@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual Environment
+venv/
+.env/
+.venv/
+
+# Environment Variables
+.env
+
+# IDEs
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Database
+*.db
+*.sqlite3
+
+# PostgreSQL Data
+postgres_data/
+
+# Redis
+redis_data/
+
+# ChromaDB Vector Storage
+chroma_db/
+
+# Pytest
+.pytest_cache/
+
+# Mypy
+.mypy_cache/
+
+# Coverage
+.coverage
+htmlcov/
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Docker
+docker-compose.override.yml
+
+# MCP Inspector
+.mcp/
+
+# Temporary files
+tmp/
+temp/
+
+# Uvicorn
+uvicorn.log
+
+# Secrets
+secrets/
