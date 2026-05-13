@@ -3,8 +3,8 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     APP_NAME: str = "AgentMind"
-    DATABASE_URL: str
-    REDIS_URL: str
+    DATABASE_URL: str = "postgresql://postgres:MPiJNQRnSkDRhwYnlwGhnkCDQhFbzxrj@postgres.railway.internal:5432/railway"
+    REDIS_URL: str = "redis://default:nKzchSEzjCUAZfVfkiEKmIvBFDsGDGqr@redis.railway.internal:6379"
     CHROMA_PATH: str = "./chroma_db"
     API_KEY_PREFIX: str = "agm"
     PUBLIC_BASE_URL: str = "http://localhost:8000"
