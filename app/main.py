@@ -80,6 +80,13 @@ def register_agent(
     request: AgentCreate,
     db: Session = Depends(get_db),
 ):
+    if request.invite_code != settings.REGISTRATION_INVITE_CODE:
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid invite code",
+        )
+    
+    
     api_key = create_api_key()
 
     agent = Agent(

@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     CHROMA_PATH: str = "./chroma_db"
     API_KEY_PREFIX: str = "agm"
     PUBLIC_BASE_URL: str = "http://localhost:8000"
+    REGISTRATION_INVITE_CODE: str = "AGENTMIND-BETA-001"
 
     class Config:
         env_file = ".env"

@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class AgentCreate(BaseModel):
     name: str
     purpose: str | None = None
+    invite_code: str
     permissions: list[str] = Field(default_factory=list)
 
 
