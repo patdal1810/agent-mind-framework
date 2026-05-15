@@ -43,7 +43,11 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
                     "type": "function",
                     "function": {
                         "name": "calculator",
-                        "description": "Use this for safe math calculations.",
+                        "description": (
+                            "Use this only for pure numeric arithmetic. "
+                            "Do not use for equations, variables, roots, algebra, or expressions containing x or '='. "
+                            "Valid examples: 45 * 12, 6/7 + 5, (20 + 5) / 2."
+                        ),
                         "parameters": {
                             "type": "object",
                             "properties": {
@@ -112,13 +116,21 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
                     "type": "function",
                     "function": {
                         "name": "quadratic_solver",
-                        "description": "Use this to solve quadratic equations.",
+                        "description": (
+                            "Use this only for regular quadratic equations in x. "
+                            "The equation must look like ax^2 + bx + c = 0. "
+                            "Do not use this for ambiguous natural language, malformed equations, or non-quadratic expressions."
+                        ),
                         "parameters": {
                             "type": "object",
                             "properties": {
                                 "equation": {
                                     "type": "string",
-                                    "description": "Quadratic equation. Example: x^2 - 5x + 6 = 0"
+                                    "description": (
+                                        "A clean quadratic equation in x. "
+                                        "Valid example: x^2 - 5x + 6 = 0. "
+                                        "Invalid example: x raise to double power of 2."
+                                    ),
                                 }
                             },
                             "required": ["equation"],
@@ -294,18 +306,30 @@ Relevant memories already retrieved:
             )
 
     messages.append(
-        {
-            "role": "system",
-            "content": """
+    {
+        "role": "system",
+        "content": """
     When responding after tool execution:
-    - If a tool succeeded, summarize the result clearly.
-    - If a tool failed, do not pretend it worked.
-    - Explain what failed in simple terms.
-    - Give a corrected input example when helpful.
+
+    - If a tool failed validation, clearly explain the validation rule that failed.
+    - Do not try to solve malformed input.
+    - Do not say "I will proceed" unless another tool was actually called.
+    - Give one corrected example format.
     - Keep the response useful for another AI agent or developer system.
+
+    For calculator:
+    - It only accepts pure numeric arithmetic.
+    - It rejects variables, equations, words, and '='.
+
+    For quadratic_solver:
+    - It only accepts regular quadratic equations in x.
+    - Required format: ax^2 + bx + c = 0.
+    - It rejects ambiguous wording like "raise to double power".
     """
         }
     )
+
+
     final_response = client.chat.completions.create(
         model=settings.OPENAI_MODEL,
         messages=messages,
