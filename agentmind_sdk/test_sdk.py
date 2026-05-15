@@ -6,6 +6,9 @@ client = AgentMindClient(
     api_key="agm_Bw74MLDmGdnWHMVdoXnIugGgBrPRqcf_p3leGr3lH60",
 )
 
+print("Health Check:")
+print(client.health_check())
+
 print("Manifest:")
 print(client.get_manifest())
 

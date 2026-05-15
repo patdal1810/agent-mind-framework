@@ -214,3 +214,25 @@ class AgentMindClient:
                 "save_result_to_memory": save_result_to_memory,
             },
         )
+    
+    
+def health_check(self) -> dict[str, Any]:
+    """
+    Check if the AgentMind API is reachable.
+    """
+    try:
+        manifest = self.get_manifest()
+
+        return {
+            "success": True,
+            "message": "AgentMind API is reachable.",
+            "manifest": manifest,
+        }
+
+    except Exception as error:
+        return {
+            "success": False,
+            "message": "Could not reach AgentMind API.",
+            "error": str(error),
+            "base_url": self.base_url,
+        }
