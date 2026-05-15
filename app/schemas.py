@@ -57,3 +57,9 @@ class AgentChatResponse(BaseModel):
     error: str | None = None
     trace_id: str
     latency_ms: int
+
+class AgentDelegateRequest(BaseModel):
+    target_agent_id: int
+    task: str
+    memory_search_limit: int = 5
+    save_result_to_memory: bool = False
