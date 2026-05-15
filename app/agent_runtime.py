@@ -234,27 +234,78 @@ Relevant memories already retrieved:
         if tool_name == "memory_search":
             tool_args["agent_id"] = agent.id
 
-        tool_result = run_registered_tool(
-            tool_name=tool_name,
-            input_data=tool_args,
-        )
+        try:
+            tool_result = run_registered_tool(
+                tool_name=tool_name,
+                input_data=tool_args,
+            )
 
-        tool_calls_log.append(
-            {
-                "tool_name": tool_name,
-                "arguments": tool_args,
-                "result": tool_result,
-            }
-        )
+            tool_calls_log.append(
+                {
+                    "tool_name": tool_name,
+                    "arguments": tool_args,
+                    "status": "success",
+                    "result": tool_result,
+                    "error": None,
+                }
+            )
 
-        messages.append(
-            {
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": json.dumps(tool_result),
-            }
-        )
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps(
+                        {
+                            "status": "success",
+                            "result": tool_result,
+                        }
+                    ),
+                }
+            )
 
+        except Exception as error:
+            error_message = str(error)
+
+            tool_calls_log.append(
+                {
+                    "tool_name": tool_name,
+                    "arguments": tool_args,
+                    "status": "failed",
+                    "result": None,
+                    "error": error_message,
+                }
+            )
+
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps(
+                        {
+                            "status": "failed",
+                            "error": error_message,
+                            "retry_hint": (
+                                "Explain the tool failure clearly. "
+                                "If possible, suggest the correct input format."
+                            ),
+                        }
+                    ),
+                }
+            )
+
+    messages.append(
+        {
+            "role": "system",
+            "content": """
+    When responding after tool execution:
+    - If a tool succeeded, summarize the result clearly.
+    - If a tool failed, do not pretend it worked.
+    - Explain what failed in simple terms.
+    - Give a corrected input example when helpful.
+    - Keep the response useful for another AI agent or developer system.
+    """
+        }
+    )
     final_response = client.chat.completions.create(
         model=settings.OPENAI_MODEL,
         messages=messages,
