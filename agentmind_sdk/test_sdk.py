@@ -9,7 +9,7 @@ client = AgentMindClient(
 print("Health Check:")
 print(client.health_check())
 
-print("Manifest:")
+print("\nManifest:")
 print(client.get_manifest())
 
 print("\nCurrent Agent:")

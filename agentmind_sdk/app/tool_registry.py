@@ -1,0 +1,227 @@
+from sqlalchemy.orm import Session
+
+from app.models import Tool
+from app.tools import (
+    calculator_tool,
+    echo_tool,
+    memory_search_tool,
+    quadratic_solver_tool,
+)
+
+
+TOOL_FUNCTIONS = {
+    "calculator": calculator_tool,
+    "memory_search": memory_search_tool,
+    "echo": echo_tool,
+    "quadratic_solver": quadratic_solver_tool,
+}
+
+
+TOOL_SPECS = {
+    "calculator": {
+        "name": "calculator",
+        "description": "Performs pure numeric arithmetic only.",
+        "permission_required": "tools:calculator:run",
+        "input_schema": {
+            "type": "object",
+            "required": ["expression"],
+            "properties": {
+                "expression": {
+                    "type": "string",
+                    "description": "A numeric arithmetic expression.",
+                    "example": "45 * 12",
+                }
+            },
+        },
+        "validation_rules": [
+            "Input must be numeric arithmetic only.",
+            "Variables like x, y, or z are not allowed.",
+            "Equations with '=' are not allowed.",
+            "Natural language text is not allowed.",
+            "Valid example: 45 * 12.",
+            "Invalid example: x^2 - 5x + 6 = 0.",
+        ],
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "expression": "string",
+                "answer": "string",
+            },
+        },
+        "example_request": {
+            "input": {
+                "expression": "45 * 12"
+            }
+        },
+        "example_response": {
+            "expression": "45 * 12",
+            "answer": "540"
+        },
+    },
+
+    "quadratic_solver": {
+        "name": "quadratic_solver",
+        "description": "Solves regular quadratic equations in x.",
+        "permission_required": "tools:quadratic_solver:run",
+        "input_schema": {
+            "type": "object",
+            "required": ["equation"],
+            "properties": {
+                "equation": {
+                    "type": "string",
+                    "description": "A clean quadratic equation in x.",
+                    "example": "x^2 - 5x + 6 = 0",
+                }
+            },
+        },
+        "validation_rules": [
+            "Equation must contain variable x.",
+            "Equation must contain exactly one '=' sign.",
+            "Equation must be degree 2.",
+            "Only one variable is allowed: x.",
+            "Ambiguous wording like 'raise to double power' is rejected.",
+            "Use clear exponent format like x^2.",
+            "Valid example: x^2 - 5x + 6 = 0.",
+            "Invalid example: x raise to double power of 2 - 5x + 6 = 0.",
+        ],
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "original_equation": "string",
+                "normalized_equation": "string",
+                "solutions": ["string"],
+            },
+        },
+        "example_request": {
+            "input": {
+                "equation": "x^2 - 5x + 6 = 0"
+            }
+        },
+        "example_response": {
+            "original_equation": "x^2 - 5x + 6 = 0",
+            "normalized_equation": "(x**2 - 5x + 6) - (0)",
+            "solutions": ["2", "3"],
+        },
+    },
+
+    "memory_search": {
+        "name": "memory_search",
+        "description": "Searches stored memories for the current agent.",
+        "permission_required": "memory:read",
+        "input_schema": {
+            "type": "object",
+            "required": ["query"],
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query for memory retrieval.",
+                    "example": "answer style",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of memories to return.",
+                    "example": 5,
+                },
+            },
+        },
+        "validation_rules": [
+            "Query must not be empty.",
+            "Agent ID is injected by AgentMind and should not be provided externally.",
+            "Limit should be a small positive integer.",
+        ],
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "memories": ["string"],
+            },
+        },
+        "example_request": {
+            "input": {
+                "query": "answer style",
+                "limit": 5,
+            }
+        },
+        "example_response": {
+            "memories": [
+                "This agent prefers short technical answers."
+            ]
+        },
+    },
+
+    "echo": {
+        "name": "echo",
+        "description": "Returns the same input. Useful for testing agents.",
+        "permission_required": "tools:echo:run",
+        "input_schema": {
+            "type": "object",
+            "required": ["message"],
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "Message to echo back.",
+                    "example": "hello agent world",
+                }
+            },
+        },
+        "validation_rules": [
+            "Input should include a message field.",
+        ],
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "echo": "object",
+            },
+        },
+        "example_request": {
+            "input": {
+                "message": "hello agent world"
+            }
+        },
+        "example_response": {
+            "echo": {
+                "message": "hello agent world"
+            }
+        },
+    },
+}
+
+
+DEFAULT_TOOLS = [
+    {
+        "name": spec["name"],
+        "description": spec["description"],
+        "permission_required": spec["permission_required"],
+    }
+    for spec in TOOL_SPECS.values()
+]
+
+
+def seed_tools(db: Session):
+    for tool_data in DEFAULT_TOOLS:
+        existing_tool = (
+            db.query(Tool)
+            .filter(Tool.name == tool_data["name"])
+            .first()
+        )
+
+        if not existing_tool:
+            db.add(Tool(**tool_data))
+
+    db.commit()
+
+
+def get_tool_spec(tool_name: str):
+    return TOOL_SPECS.get(tool_name)
+
+
+def list_tool_specs():
+    return list(TOOL_SPECS.values())
+
+
+def run_registered_tool(tool_name: str, input_data: dict):
+    tool = TOOL_FUNCTIONS.get(tool_name)
+
+    if not tool:
+        raise ValueError("Tool not found")
+
+    return tool(input_data)

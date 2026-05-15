@@ -215,24 +215,31 @@ class AgentMindClient:
             },
         )
     
-    
-def health_check(self) -> dict[str, Any]:
-    """
-    Check if the AgentMind API is reachable.
-    """
-    try:
-        manifest = self.get_manifest()
 
-        return {
-            "success": True,
-            "message": "AgentMind API is reachable.",
-            "manifest": manifest,
-        }
+    def health_check(self) -> dict[str, Any]:
+        """
+        Check if the AgentMind API is reachable.
 
-    except Exception as error:
-        return {
-            "success": False,
-            "message": "Could not reach AgentMind API.",
-            "error": str(error),
-            "base_url": self.base_url,
-        }
+        This helps developers quickly confirm that:
+        - the base URL is correct
+        - the API is online
+        - the manifest endpoint works
+        """
+
+        try:
+            manifest = self.get_manifest()
+
+            return {
+                "success": True,
+                "message": "AgentMind API is reachable.",
+                "base_url": self.base_url,
+                "manifest": manifest,
+            }
+
+        except Exception as error:
+            return {
+                "success": False,
+                "message": "Could not reach AgentMind API.",
+                "base_url": self.base_url,
+                "error": str(error),
+            }
