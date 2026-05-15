@@ -4,6 +4,8 @@ import json
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
 
+from app.models import AgentTask
+
 from app.agent_runtime import run_agent_runtime
 
 from app.audit import create_trace_id, write_audit_log
@@ -11,7 +13,7 @@ from app.config import settings
 from app.database import Base, engine, SessionLocal
 from app.dependencies import get_current_agent, get_db, require_permission
 from app.memory_service import save_memory, search_memory
-from app.models import Agent, AgentPermission, Tool
+from app.models import Agent, AgentPermission, Tool, AgentTask
 from app.rate_limit import check_rate_limit
 from app.schemas import (
     AgentCreate,
@@ -28,6 +30,14 @@ from app.tool_registry import (
     list_tool_specs,
     run_registered_tool,
     seed_tools,
+)
+
+from app.task_service import (
+    create_task_record,
+    mark_task_running,
+    mark_task_completed,
+    mark_task_failed,
+    serialize_task,
 )
 
 
@@ -390,6 +400,16 @@ def agent_chat(
 
     check_rate_limit(agent.id, agent.rate_limit_per_minute)
 
+    task_record = create_task_record(
+        db=db,
+        task=request.task,
+        assigned_agent_id=target_agent.id,
+        caller_agent_id=caller_agent.id,
+        trace_id=trace_id,
+    )
+
+    mark_task_running(db=db, task_record=task_record)
+
     try:
         result = run_agent_runtime(
             db=db,
@@ -397,6 +417,13 @@ def agent_chat(
             task=request.task,
             memory_search_limit=request.memory_search_limit,
             save_result_to_memory=request.save_result_to_memory,
+        )
+
+        mark_task_completed(
+            db=db,
+            task_record=task_record,
+            response=result["response"],
+            tool_calls=result["tool_calls"],
         )
 
         write_audit_log(
@@ -411,16 +438,24 @@ def agent_chat(
 
         return {
             "success": True,
+            "task_id": task_record.id,
             "task": request.task,
             "response": result["response"],
             "memories_used": result["memories_used"],
             "tool_calls": result["tool_calls"],
             "error": None,
             "trace_id": trace_id,
+            "task_id": task_record.id,
             "latency_ms": int((time.time() - start) * 1000),
         }
 
     except Exception as error:
+        mark_task_failed(
+            db=db,
+            task_record=task_record,
+            error=str(error),
+        )
+
         write_audit_log(
             db=db,
             agent_id=agent.id,
@@ -432,7 +467,6 @@ def agent_chat(
         )
 
         raise HTTPException(status_code=500, detail=str(error))
-    
 
 
 @app.get("/v1/agents/discover")
