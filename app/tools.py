@@ -2,6 +2,9 @@ import numexpr as ne
 
 from app.memory_service import search_memory
 
+from sympy import Eq, symbols, solve
+from sympy.parsing.sympy_parser import parse_expr
+
 
 def calculator_tool(input_data: dict):
     expression = input_data.get("expression")
@@ -41,4 +44,27 @@ def memory_search_tool(input_data: dict):
 def echo_tool(input_data: dict):
     return {
         "echo": input_data,
+    }
+
+def quadratic_solver_tool(input_data: dict):
+    equation = input_data.get("equation")
+
+    if not equation:
+        raise ValueError("Missing equation")
+    
+    x = symbols("x")
+
+    cleaned_equation = (
+        equation.replace("^", "**")
+        .replace("=0", "")
+        .strip()
+    )
+
+    expr = parse_expr(cleaned_equation)
+
+    result = solve(Eq(expr, 0), x)
+
+    return {
+        "equation": equation,
+        "solution": [str(r) for r in result]
     }

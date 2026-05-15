@@ -1,11 +1,12 @@
 from sqlalchemy.orm import Session
 from app.models import Tool
-from app.tools import calculator_tool, echo_tool, memory_search_tool
+from app.tools import calculator_tool, echo_tool, memory_search_tool, quadratic_solver_tool
 
 TOOL_FUNCTIONS = {
     "calculator": calculator_tool,
     "memory_search": memory_search_tool,
     "echo": echo_tool,
+    "uadratic_solver": quadratic_solver_tool,
 }
 
 
@@ -25,6 +26,11 @@ DEFAULT_TOOLS = [
         "description": "Returns the same input. Useful for testing.",
         "permission_required": "tools:echo:run",
     },
+    {
+        "name": "quadratic_solver",
+        "description": "Solves quadratic equations symbolically.",
+        "permission_required": "tools:quadratic_solver:run",
+    }
 ]
 
 
