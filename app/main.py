@@ -376,13 +376,7 @@ def agent_chat(
 @app.get("/debug/env")
 def debug_env():
     return {
-        "has_openai_key": bool(settings.OPENAI_KEY),
+        "has_openai_key": bool(settings.OPENAI_API_KEY),
         "openai_model": settings.OPENAI_MODEL,
     }
-
-@app.get("/debug/raw")
-def debug_raw():
-    import os
-    return {
-        "raw_env": os.getenv("OPENAI_KEY"),
-    }
+    
