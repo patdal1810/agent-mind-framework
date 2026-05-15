@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from sympy import Poly, symbols
 from sympy.parsing.sympy_parser import (
@@ -192,3 +193,23 @@ def validate_quadratic_equation(equation: str) -> ValidationResult:
                 f"Parser error: {str(error)}"
             ),
         )
+    
+def validate_url(value: str) -> ValidationResult:
+    if not value or not value.strip():
+        return ValidationResult(False, error="URL is required.")
+
+    parsed = urlparse(value.strip())
+
+    if parsed.scheme not in ["http", "https"]:
+        return ValidationResult(
+            False,
+            error="URL must start with http:// or https://."
+        )
+
+    if not parsed.netloc:
+        return ValidationResult(
+            False,
+            error="URL must include a valid domain."
+        )
+
+    return ValidationResult(True, cleaned_input=value.strip())

@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from app.tools import url_reader_tool
 
 from app.models import Tool
 from app.tools import (
@@ -14,6 +15,7 @@ TOOL_FUNCTIONS = {
     "memory_search": memory_search_tool,
     "echo": echo_tool,
     "quadratic_solver": quadratic_solver_tool,
+    "url_reader": url_reader_tool
 }
 
 
@@ -183,6 +185,58 @@ TOOL_SPECS = {
             }
         },
     },
+
+    "url_reader": {
+        "name": "url_reader",
+        "description": "Fetches a webpage and extracts readable text content.",
+        "permission_required": "tools:url_reader:run",
+        "input_schema": {
+            "type": "object",
+            "required": ["url"],
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The webpage URL to read.",
+                    "example": "https://example.com",
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "description": "Maximum characters of text to return.",
+                    "example": 4000,
+                },
+            },
+        },
+        "validation_rules": [
+            "URL must start with http:// or https://.",
+            "URL must contain a valid domain.",
+            "Private file paths are not allowed.",
+            "If max_chars is provided, it should be a positive integer.",
+        ],
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "url": "string",
+                "title": "string | null",
+                "content": "string",
+                "truncated": "boolean",
+                "content_length": "integer",
+            },
+        },
+        "example_request": {
+            "input": {
+                "url": "https://example.com",
+                "max_chars": 4000,
+            }
+        },
+        "example_response": {
+            "url": "https://example.com",
+            "title": "Example Domain",
+            "content": "Example Domain This domain is for use in illustrative examples...",
+            "truncated": False,
+            "content_length": 120,
+        },
+    },
+
 }
 
 

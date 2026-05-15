@@ -132,6 +132,34 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
                     },
                 }
             )
+        elif tool.name == "url_reader":
+            runtime_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "url_reader",
+                        "description": (
+                            "Use this to fetch and read text content from a public webpage URL. "
+                            "Use when a task asks to read, summarize, analyze, or extract information from a URL."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "url": {
+                                    "type": "string",
+                                    "description": "A public URL starting with http:// or https://.",
+                                },
+                                "max_chars": {
+                                    "type": "integer",
+                                    "description": "Maximum text characters to return.",
+                                },
+                            },
+                            "required": ["url"],
+                            "additionalProperties": False,
+                        },
+                    },
+                }
+            )
 
     return runtime_tools
 

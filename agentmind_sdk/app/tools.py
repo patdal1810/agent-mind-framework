@@ -1,5 +1,8 @@
 import numexpr as ne
 from sympy import Eq, symbols, solve
+import requests
+from bs4 import BeautifulSoup
+
 from sympy.parsing.sympy_parser import (
     parse_expr,
     standard_transformations,
@@ -9,7 +12,7 @@ from sympy.parsing.sympy_parser import (
 from app.memory_service import search_memory
 from app.tool_validators import (
     validate_calculator_expression,
-    validate_quadratic_equation,
+    validate_quadratic_equation,validate_url
 )
 
 
@@ -98,4 +101,45 @@ def memory_search_tool(input_data: dict):
 def echo_tool(input_data: dict):
     return {
         "echo": input_data,
+    }
+
+
+def url_reader_tool(input_data: dict):
+    url = input_data.get("url")
+    max_chars = input_data.get("max_chars", 4000)
+
+    validation = validate_url(url)
+
+    if not validation.is_valid:
+        raise ValueError(validation.error)
+
+    try:
+        response = requests.get(
+            validation.cleaned_input,
+            timeout=10,
+            headers={
+                "User-Agent": "AgentMindBot/0.1"
+            }
+        )
+        response.raise_for_status()
+
+    except requests.RequestException as error:
+        raise ValueError(f"Could not fetch URL: {str(error)}")
+
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    for tag in soup(["script", "style", "nav", "footer", "header"]):
+        tag.decompose()
+
+    text = " ".join(soup.get_text(separator=" ").split())
+
+    if not text:
+        raise ValueError("No readable text found at URL.")
+
+    return {
+        "url": validation.cleaned_input,
+        "title": soup.title.string.strip() if soup.title and soup.title.string else None,
+        "content": text[:max_chars],
+        "truncated": len(text) > max_chars,
+        "content_length": len(text),
     }
