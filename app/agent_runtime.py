@@ -110,21 +110,21 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
             runtime_tools.append(
                 {
                     "type": "function",
-                    "function":{
+                    "function": {
                         "name": "quadratic_solver",
                         "description": "Use this to solve quadratic equations.",
-                        "parameters":{
+                        "parameters": {
                             "type": "object",
-                            "properties":{
+                            "properties": {
                                 "equation": {
                                     "type": "string",
-                                    "description": "Quadratic equation. Example: X^2 - 3x + 8 = 0"
+                                    "description": "Quadratic equation. Example: x^2 - 5x + 6 = 0"
                                 }
                             },
-                            "rquired": ["equation"],
+                            "required": ["equation"],
                             "additionalProperties": False,
-                        }
-                    }
+                        },
+                    },
                 }
             )
 

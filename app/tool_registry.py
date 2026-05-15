@@ -6,7 +6,7 @@ TOOL_FUNCTIONS = {
     "calculator": calculator_tool,
     "memory_search": memory_search_tool,
     "echo": echo_tool,
-    "uadratic_solver": quadratic_solver_tool,
+    "quadratic_solver": quadratic_solver_tool,
 }
 
 
