@@ -3,7 +3,11 @@ import numexpr as ne
 from app.memory_service import search_memory
 
 from sympy import Eq, symbols, solve
-from sympy.parsing.sympy_parser import parse_expr
+from sympy.parsing.sympy_parser import (
+    parse_expr,
+    standard_transformations,
+    implicit_multiplication_application,
+)
 
 
 def calculator_tool(input_data: dict):
@@ -55,17 +59,44 @@ def quadratic_solver_tool(input_data: dict):
 
     x = symbols("x")
 
-    cleaned_equation = (
-        equation.replace("^", "**")
-        .replace("=0", "")
-        .strip()
+    cleaned = equation.lower()
+
+    cleaned = cleaned.replace("“", "").replace("”", "")
+    cleaned = cleaned.replace("−", "-")
+    cleaned = cleaned.replace("^", "**")
+    cleaned = cleaned.replace("raise to the power of", "**")
+    cleaned = cleaned.replace("raised to the power of", "**")
+    cleaned = cleaned.replace("x squared", "x**2")
+    cleaned = cleaned.replace("x square", "x**2")
+
+    cleaned = cleaned.replace("solve this quadratic equation:", "")
+    cleaned = cleaned.replace("solve quadratic equation:", "")
+    cleaned = cleaned.replace("solve:", "")
+    cleaned = cleaned.strip()
+
+    if "=" in cleaned:
+        left_side, right_side = cleaned.split("=", 1)
+        cleaned = f"({left_side}) - ({right_side})"
+
+    transformations = standard_transformations + (
+        implicit_multiplication_application,
     )
 
-    expr = parse_expr(cleaned_equation)
+    try:
+        expr = parse_expr(
+            cleaned,
+            transformations=transformations,
+        )
 
-    result = solve(Eq(expr, 0), x)
+        result = solve(Eq(expr, 0), x)
 
-    return {
-        "equation": equation,
-        "solutions": [str(r) for r in result]
-    }
+        return {
+            "original_equation": equation,
+            "cleaned_equation": cleaned,
+            "solutions": [str(r) for r in result],
+        }
+
+    except Exception as error:
+        raise ValueError(
+            f"Could not parse equation. Original: {equation}. Cleaned: {cleaned}. Error: {str(error)}"
+        )
