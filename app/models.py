@@ -75,6 +75,7 @@ class AuditLog(Base):
     trace_id = Column(String(120), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
 class AgentTask(Base):
     __tablename__ = "agent_tasks"
 

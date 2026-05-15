@@ -14,12 +14,6 @@ def create_task_record(
     trace_id: str,
     caller_agent_id: int | None = None,
 ) -> AgentTask:
-    """
-    Create a task record before the runtime starts working.
-
-    Status starts as 'created'.
-    """
-
     record = AgentTask(
         task=task,
         status="created",
@@ -39,12 +33,6 @@ def mark_task_running(
     db: Session,
     task_record: AgentTask,
 ) -> AgentTask:
-    """
-    Mark a task as running.
-
-    This tells us the agent runtime has started processing it.
-    """
-
     task_record.status = "running"
     task_record.updated_at = datetime.utcnow()
 
@@ -60,13 +48,10 @@ def mark_task_completed(
     response: str,
     tool_calls: list[dict[str, Any]],
 ) -> AgentTask:
-    """
-    Mark a task as completed and save the final response.
-    """
-
     task_record.status = "completed"
     task_record.response = response
     task_record.tool_calls = json.dumps(tool_calls, default=str)
+    task_record.error = None
     task_record.updated_at = datetime.utcnow()
 
     db.commit()
@@ -81,10 +66,6 @@ def mark_task_failed(
     error: str,
     tool_calls: list[dict[str, Any]] | None = None,
 ) -> AgentTask:
-    """
-    Mark a task as failed and save the error.
-    """
-
     task_record.status = "failed"
     task_record.error = error
     task_record.tool_calls = json.dumps(tool_calls or [], default=str)
@@ -97,10 +78,6 @@ def mark_task_failed(
 
 
 def serialize_task(task_record: AgentTask) -> dict[str, Any]:
-    """
-    Convert database task record into clean JSON for API responses.
-    """
-
     try:
         tool_calls = json.loads(task_record.tool_calls or "[]")
     except Exception:

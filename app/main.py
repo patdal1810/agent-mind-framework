@@ -1,43 +1,38 @@
-import time
 import json
+import time
 
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
 
-from app.models import AgentTask
-
 from app.agent_runtime import run_agent_runtime
-
 from app.audit import create_trace_id, write_audit_log
 from app.config import settings
-from app.database import Base, engine, SessionLocal
+from app.database import Base, SessionLocal, engine
 from app.dependencies import get_current_agent, get_db, require_permission
 from app.memory_service import save_memory, search_memory
-from app.models import Agent, AgentPermission, Tool, AgentTask
+from app.models import Agent, AgentPermission, AgentTask, Tool
 from app.rate_limit import check_rate_limit
 from app.schemas import (
+    AgentChatRequest,
     AgentCreate,
     AgentCreateResponse,
+    AgentDelegateRequest,
     MemoryCreate,
     MemorySearch,
     ToolRunRequest,
-    AgentChatRequest,
-    AgentDelegateRequest,
 )
 from app.security import create_api_key, hash_api_key
-from app.tool_registry import (
-    get_tool_spec,
-    list_tool_specs,
-    run_registered_tool,
-    seed_tools,
-)
-
 from app.task_service import (
     create_task_record,
-    mark_task_running,
     mark_task_completed,
     mark_task_failed,
+    mark_task_running,
     serialize_task,
+)
+from app.tool_registry import (
+    get_tool_spec,
+    run_registered_tool,
+    seed_tools,
 )
 
 
@@ -59,7 +54,7 @@ def startup():
 def root():
     return {
         "name": settings.APP_NAME,
-        "message": "Agent infrastructure API for memory, tools, identity, and MCP.",
+        "message": "Agent infrastructure API for memory, tools, identity, MCP, delegation, and task history.",
     }
 
 
@@ -67,7 +62,7 @@ def root():
 def agent_manifest():
     return {
         "name": "AgentMind",
-        "description": "Memory and tool infrastructure for AI agents.",
+        "description": "Memory, tool, runtime, and coordination infrastructure for AI agents.",
         "version": "1.0.0",
         "base_url": settings.PUBLIC_BASE_URL,
         "auth": {
@@ -76,30 +71,30 @@ def agent_manifest():
         },
         "capabilities": [
             "agent.identity",
+            "agent.discovery",
+            "agent.delegation",
+            "agent.runtime",
             "memory.write",
             "memory.search",
             "tools.discover",
             "tools.run",
+            "tool_schema_registry",
+            "task.history",
             "audit.logs",
             "rate.limits",
             "mcp.compatible",
-            "agent.runtime",
-            "tool_schema_registry",
-            "agent.discovery",
-            "agent.delegation",
-            "task.history",
         ],
         "endpoints": {
             "register_agent": "/v1/agents/register",
             "current_agent": "/v1/agents/me",
+            "discover_agents": "/v1/agents/discover",
+            "delegate_agent": "/v1/agents/delegate",
             "save_memory": "/v1/memories",
             "search_memory": "/v1/memories/search",
             "list_tools": "/v1/tools",
+            "get_tool_details": "/v1/tools/{tool_name}",
             "run_tool": "/v1/tools/{tool_name}/run",
             "agent_chat": "/v1/agent/chat",
-            "get_tool_details": "/v1/tools/{tool_name}",
-            "discover_agents": "/v1/agents/discover",
-            "delegate_agent": "/v1/agents/delegate",
             "list_tasks": "/v1/tasks",
             "get_task": "/v1/tasks/{task_id}",
         },
@@ -116,8 +111,7 @@ def register_agent(
             status_code=403,
             detail="Invalid invite code",
         )
-    
-    
+
     api_key = create_api_key()
 
     agent = Agent(
@@ -166,6 +160,143 @@ def get_me(agent: Agent = Depends(get_current_agent)):
         "rate_limit_per_minute": agent.rate_limit_per_minute,
         "permissions": [p.permission for p in agent.permissions],
     }
+
+
+@app.get("/v1/agents/discover")
+def discover_agents(
+    capability: str | None = None,
+    db: Session = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    check_rate_limit(agent.id, agent.rate_limit_per_minute)
+
+    agents = db.query(Agent).filter(Agent.is_active == True).all()
+
+    result = []
+
+    for available_agent in agents:
+        capabilities = json.loads(available_agent.capabilities or "[]")
+
+        if capability and capability not in capabilities:
+            continue
+
+        result.append(
+            {
+                "id": available_agent.id,
+                "name": available_agent.name,
+                "purpose": available_agent.purpose,
+                "capabilities": capabilities,
+            }
+        )
+
+    return {
+        "success": True,
+        "result": result,
+    }
+
+
+@app.post("/v1/agents/delegate")
+def delegate_to_agent(
+    request: AgentDelegateRequest,
+    db: Session = Depends(get_db),
+    caller_agent: Agent = Depends(require_permission("agents:delegate")),
+):
+    start = time.time()
+    trace_id = create_trace_id()
+
+    check_rate_limit(
+        caller_agent.id,
+        caller_agent.rate_limit_per_minute,
+    )
+
+    target_agent = (
+        db.query(Agent)
+        .filter(
+            Agent.id == request.target_agent_id,
+            Agent.is_active == True,
+        )
+        .first()
+    )
+
+    if not target_agent:
+        raise HTTPException(
+            status_code=404,
+            detail="Target agent not found",
+        )
+
+    task_record = create_task_record(
+        db=db,
+        task=request.task,
+        assigned_agent_id=target_agent.id,
+        caller_agent_id=caller_agent.id,
+        trace_id=trace_id,
+    )
+
+    mark_task_running(db=db, task_record=task_record)
+
+    try:
+        result = run_agent_runtime(
+            db=db,
+            agent=target_agent,
+            task=request.task,
+            memory_search_limit=request.memory_search_limit,
+            save_result_to_memory=request.save_result_to_memory,
+        )
+
+        mark_task_completed(
+            db=db,
+            task_record=task_record,
+            response=result["response"],
+            tool_calls=result["tool_calls"],
+        )
+
+        output = {
+            "task_id": task_record.id,
+            "caller_agent_id": caller_agent.id,
+            "target_agent_id": target_agent.id,
+            "target_agent_name": target_agent.name,
+            "task": request.task,
+            "response": result["response"],
+            "memories_used": result["memories_used"],
+            "tool_calls": result["tool_calls"],
+        }
+
+        write_audit_log(
+            db=db,
+            agent_id=caller_agent.id,
+            action="agent.delegate",
+            input_data=request.model_dump(),
+            output_data=output,
+            status="success",
+            trace_id=trace_id,
+        )
+
+        return {
+            "success": True,
+            "result": output,
+            "error": None,
+            "trace_id": trace_id,
+            "latency_ms": int((time.time() - start) * 1000),
+        }
+
+    except Exception as error:
+        mark_task_failed(
+            db=db,
+            task_record=task_record,
+            error=str(error),
+        )
+
+        write_audit_log(
+            db=db,
+            agent_id=caller_agent.id,
+            action="agent.delegate",
+            input_data=request.model_dump(),
+            output_data={"error": str(error)},
+            status="error",
+            trace_id=trace_id,
+        )
+
+        raise HTTPException(status_code=500, detail=str(error))
 
 
 @app.post("/v1/memories")
@@ -390,7 +521,7 @@ def run_tool(
         )
 
         raise HTTPException(status_code=500, detail=str(error))
-    
+
 
 @app.post("/v1/agent/chat")
 def agent_chat(
@@ -406,8 +537,8 @@ def agent_chat(
     task_record = create_task_record(
         db=db,
         task=request.task,
-        assigned_agent_id=target_agent.id,
-        caller_agent_id=caller_agent.id,
+        assigned_agent_id=agent.id,
+        caller_agent_id=None,
         trace_id=trace_id,
     )
 
@@ -448,7 +579,6 @@ def agent_chat(
             "tool_calls": result["tool_calls"],
             "error": None,
             "trace_id": trace_id,
-            "task_id": task_record.id,
             "latency_ms": int((time.time() - start) * 1000),
         }
 
@@ -472,156 +602,12 @@ def agent_chat(
         raise HTTPException(status_code=500, detail=str(error))
 
 
-@app.get("/v1/agents/discover")
-def discover_agents(
-    capability: str | None = None,
-    db: Session = Depends(get_db),
-    agent: Agent = Depends(get_current_agent),
-):
-    """
-    Discover active agents.
-
-    Optional:
-    - filter by capability
-
-    This is the first step toward multi-agent coordination.
-    """
-
-    check_rate_limit(agent.id, agent.rate_limit_per_minute)
-
-    agents = db.query(Agent).filter(Agent.is_active == True).all()
-
-    result = []
-
-    for available_agent in agents:
-        capabilities = json.loads(available_agent.capabilities or "[]")
-
-        if capability and capability not in capabilities:
-            continue
-
-        result.append(
-            {
-                "id": available_agent.id,
-                "name": available_agent.name,
-                "purpose": available_agent.purpose,
-                "capabilities": capabilities,
-            }
-        )
-
-    return {
-        "success": True,
-        "result": result,
-    }
-
-
-@app.post("/v1/agents/delegate")
-def delegate_to_agent(
-    request: AgentDelegateRequest,
-    db: Session = Depends(get_db),
-    caller_agent: Agent = Depends(require_permission("agents:delegate")),
-):
-    """
-    Delegate a task from one agent to another.
-
-    The caller must have:
-    - agents:delegate
-
-    The task is executed as the target agent, meaning:
-    - target agent's memory is used
-    - target agent's permissions are used
-    - target agent's tools are used
-    """
-
-    start = time.time()
-    trace_id = create_trace_id()
-
-    check_rate_limit(
-        caller_agent.id,
-        caller_agent.rate_limit_per_minute,
-    )
-
-    target_agent = (
-        db.query(Agent)
-        .filter(
-            Agent.id == request.target_agent_id,
-            Agent.is_active == True,
-        )
-        .first()
-    )
-
-    if not target_agent:
-        raise HTTPException(
-            status_code=404,
-            detail="Target agent not found",
-        )
-
-    try:
-        result = run_agent_runtime(
-            db=db,
-            agent=target_agent,
-            task=request.task,
-            memory_search_limit=request.memory_search_limit,
-            save_result_to_memory=request.save_result_to_memory,
-        )
-
-        output = {
-            "caller_agent_id": caller_agent.id,
-            "target_agent_id": target_agent.id,
-            "target_agent_name": target_agent.name,
-            "task": request.task,
-            "response": result["response"],
-            "memories_used": result["memories_used"],
-            "tool_calls": result["tool_calls"],
-        }
-
-        write_audit_log(
-            db=db,
-            agent_id=caller_agent.id,
-            action="agent.delegate",
-            input_data=request.model_dump(),
-            output_data=output,
-            status="success",
-            trace_id=trace_id,
-        )
-
-        return {
-            "success": True,
-            "result": output,
-            "error": None,
-            "trace_id": trace_id,
-            "latency_ms": int((time.time() - start) * 1000),
-        }
-
-    except Exception as error:
-        write_audit_log(
-            db=db,
-            agent_id=caller_agent.id,
-            action="agent.delegate",
-            input_data=request.model_dump(),
-            output_data={"error": str(error)},
-            status="error",
-            trace_id=trace_id,
-        )
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(error),
-        )
-    
 @app.get("/v1/tasks")
 def list_tasks(
     status: str | None = None,
     db: Session = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
-    """
-    List task history for the current agent.
-
-    Shows tasks where the current agent was either:
-    - the caller
-    - the assigned worker
-    """
-
     check_rate_limit(agent.id, agent.rate_limit_per_minute)
 
     query = db.query(AgentTask).filter(
@@ -646,12 +632,6 @@ def get_task(
     db: Session = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
-    """
-    Get one task record.
-
-    Agents can only view tasks they called or were assigned.
-    """
-
     check_rate_limit(agent.id, agent.rate_limit_per_minute)
 
     task = db.query(AgentTask).filter(AgentTask.id == task_id).first()
