@@ -30,7 +30,7 @@ DEFAULT_TOOLS = [
         "name": "quadratic_solver",
         "description": "Solves quadratic equations symbolically.",
         "permission_required": "tools:quadratic_solver:run",
-    }
+    },
 ]
 
 

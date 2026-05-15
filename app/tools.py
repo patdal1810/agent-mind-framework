@@ -46,12 +46,13 @@ def echo_tool(input_data: dict):
         "echo": input_data,
     }
 
+
 def quadratic_solver_tool(input_data: dict):
     equation = input_data.get("equation")
 
     if not equation:
         raise ValueError("Missing equation")
-    
+
     x = symbols("x")
 
     cleaned_equation = (
@@ -66,5 +67,5 @@ def quadratic_solver_tool(input_data: dict):
 
     return {
         "equation": equation,
-        "solution": [str(r) for r in result]
+        "solutions": [str(r) for r in result]
     }
