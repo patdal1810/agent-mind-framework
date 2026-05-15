@@ -20,6 +20,7 @@ class Agent(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(120), nullable=False)
     purpose = Column(Text, nullable=True)
+    capabilities = Column(Text, nullable=True)
     api_key_hash = Column(Text, nullable=False)
     is_active = Column(Boolean, default=True)
     rate_limit_per_minute = Column(Integer, default=60)

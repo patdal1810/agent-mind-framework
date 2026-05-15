@@ -1,4 +1,5 @@
 import time
+import json
 
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
@@ -73,6 +74,7 @@ def agent_manifest():
             "mcp.compatible",
             "agent.runtime",
             "tool_schema_registry",
+            "agent.discovery"
         ],
         "endpoints": {
             "register_agent": "/v1/agents/register",
@@ -83,6 +85,7 @@ def agent_manifest():
             "run_tool": "/v1/tools/{tool_name}/run",
             "agent_chat": "/v1/agent/chat",
             "get_tool_details": "/v1/tools/{tool_name}",
+            "discover_agents": "/v1/agents/discover",
         },
     }
 
@@ -104,6 +107,7 @@ def register_agent(
     agent = Agent(
         name=request.name,
         purpose=request.purpose,
+        capabilities=json.dumps(request.capabilities),
         api_key_hash=hash_api_key(api_key),
     )
 
@@ -141,6 +145,7 @@ def get_me(agent: Agent = Depends(get_current_agent)):
         "id": agent.id,
         "name": agent.name,
         "purpose": agent.purpose,
+        "capabilities": json.loads(agent.capabilities or "[]"),
         "is_active": agent.is_active,
         "rate_limit_per_minute": agent.rate_limit_per_minute,
         "permissions": [p.permission for p in agent.permissions],
@@ -425,3 +430,45 @@ def agent_chat(
 
         raise HTTPException(status_code=500, detail=str(error))
     
+
+
+@app.get("/v1/agents/discover")
+def discover_agents(
+    capability: str | None = None,
+    db: Session = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """
+    Discover active agents.
+
+    Optional:
+    - filter by capability
+
+    This is the first step toward multi-agent coordination.
+    """
+
+    check_rate_limit(agent.id, agent.rate_limit_per_minute)
+
+    agents = db.query(Agent).filter(Agent.is_active == True).all()
+
+    result = []
+
+    for available_agent in agents:
+        capabilities = json.loads(available_agent.capabilities or "[]")
+
+        if capability and capability not in capabilities:
+            continue
+
+        result.append(
+            {
+                "id": available_agent.id,
+                "name": available_agent.name,
+                "purpose": available_agent.purpose,
+                "capabilities": capabilities,
+            }
+        )
+
+    return {
+        "success": True,
+        "result": result,
+    }

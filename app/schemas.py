@@ -7,6 +7,7 @@ class AgentCreate(BaseModel):
     name: str
     purpose: str | None = None
     invite_code: str
+    capabilities: list[str] = Field(default_factory=list)
     permissions: list[str] = Field(default_factory=list)
 
 
@@ -14,6 +15,12 @@ class AgentCreateResponse(BaseModel):
     agent_id: int
     api_key: str
     message: str
+
+class AgentDiscoverResponse(BaseModel):
+    id: int
+    name: str
+    purpose: str | None = None
+    capabilities: list[str] = Field(default_factory=list)
 
 
 class MemoryCreate(BaseModel):
