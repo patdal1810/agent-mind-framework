@@ -116,6 +116,7 @@ client.chat(
 )
 ```
 
+
 ---
 
 # Features
@@ -211,4 +212,4 @@ python test_sdk.py
 
 # Author
 
-Built by Patrick Olumba
+Built by Olumba Chidubem Patrick
