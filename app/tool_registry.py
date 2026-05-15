@@ -236,6 +236,66 @@ TOOL_SPECS = {
             "content_length": 120,
         },
     },
+
+    "delegate_task": {
+        "name": "delegate_task",
+        "description": "Delegates a task to another registered agent.",
+        "permission_required": "agents:delegate",
+        "input_schema": {
+            "type": "object",
+            "required": ["target_agent_id", "task", "reason"],
+            "properties": {
+                "target_agent_id": {
+                    "type": "integer",
+                    "description": "ID of the target agent.",
+                    "example": 2,
+                },
+                "task": {
+                    "type": "string",
+                    "description": "Task to send to the target agent.",
+                    "example": "Solve x^2 - 5x + 6 = 0",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Reason for delegation.",
+                    "example": "Math Agent has quadratic_solver capability.",
+                },
+            },
+        },
+        "validation_rules": [
+            "Caller must have agents:delegate permission.",
+            "Target agent must exist and be active.",
+            "Task must not be empty.",
+            "Target agent executes task using its own permissions and memory.",
+        ],
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "target_agent_id": "integer",
+                "target_agent_name": "string",
+                "response": "string",
+                "tool_calls": ["object"],
+            },
+        },
+        "example_request": {
+            "input": {
+                "target_agent_id": 2,
+                "task": "What is 45 * 12?",
+                "reason": "Math Agent is better suited for calculations.",
+            }
+        },
+        "example_response": {
+            "target_agent_id": 2,
+            "target_agent_name": "Math Agent",
+            "response": "45 * 12 = 540.",
+            "tool_calls": [
+                {
+                    "tool_name": "calculator",
+                    "status": "success",
+                }
+            ],
+        },
+    },
 }
 
 

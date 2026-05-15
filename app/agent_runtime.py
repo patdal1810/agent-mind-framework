@@ -160,8 +160,104 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
                     },
                 }
             )
+        elif tool.name == "delegate_task":
+            runtime_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "delegate_task",
+                        "description": (
+                            "Delegate a task to another specialized agent. "
+                            "Use this when another agent has a better capability for the task."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "target_agent_id": {
+                                    "type": "integer",
+                                    "description": "The ID of the target agent to delegate to.",
+                                },
+                                "task": {
+                                    "type": "string",
+                                    "description": "The task to delegate to the target agent.",
+                                },
+                                "reason": {
+                                    "type": "string",
+                                    "description": "Why this task should be delegated.",
+                                },
+                            },
+                            "required": ["target_agent_id", "task", "reason"],
+                            "additionalProperties": False,
+                        },
+                    },
+                }
+            )
 
     return runtime_tools
+
+
+def run_delegate_task(
+    db: Session,
+    caller_agent: Agent,
+    target_agent_id: int,
+    task: str,
+    reason: str,
+    delegation_depth: int = 0,
+    max_delegation_depth: int = 2,
+) -> dict[str, Any]:
+    """
+    Runs a delegated task as another agent.
+
+    Important:
+    The target agent uses its own:
+    - permissions
+    - tools
+    - memory
+    - identity
+    """
+
+    caller_permissions = [p.permission for p in caller_agent.permissions]
+
+    if "agents:delegate" not in caller_permissions:
+        raise ValueError("Caller agent does not have agents:delegate permission.")
+
+    if delegation_depth >= max_delegation_depth:
+        raise ValueError("Maximum delegation depth reached.")
+    
+    if not task or not task.strip():
+        raise ValueError("Delegated task cannot be empty.")
+
+    target_agent = (
+        db.query(Agent)
+        .filter(
+            Agent.id == target_agent_id,
+            Agent.is_active == True,
+        )
+        .first()
+    )
+
+    if not target_agent:
+        raise ValueError("Target agent not found or inactive.")
+
+    result = run_agent_runtime(
+        db=db,
+        agent=target_agent,
+        task=task,
+        memory_search_limit=5,
+        save_result_to_memory=False,
+        delegation_depth=delegation_depth + 1,
+        max_delegation_depth=max_delegation_depth,
+    )
+
+    return {
+        "target_agent_id": target_agent.id,
+        "target_agent_name": target_agent.name,
+        "delegation_reason": reason,
+        "task": task,
+        "response": result["response"],
+        "memories_used": result["memories_used"],
+        "tool_calls": result["tool_calls"],
+    }
 
 
 def run_agent_runtime(
@@ -170,6 +266,8 @@ def run_agent_runtime(
     task: str,
     memory_search_limit: int = 5,
     save_result_to_memory: bool = False,
+    delegation_depth: int = 0,
+    max_delegation_depth: int = 2,
 ) -> dict[str, Any]:
     client = get_openai_client()
 
@@ -180,6 +278,28 @@ def run_agent_runtime(
     )
 
     tools = build_runtime_tools(db=db, agent=agent)
+
+    available_agents = db.query(Agent).filter(Agent.is_active == True).all()
+
+    agent_directory = []
+
+    for available_agent in available_agents:
+        if available_agent.id == agent.id:
+            continue
+
+        try:
+            capabilities = json.loads(available_agent.capabilities or "[]")
+        except Exception:
+            capabilities = []
+
+        agent_directory.append(
+            {
+                "id": available_agent.id,
+                "name": available_agent.name,
+                "purpose": available_agent.purpose,
+                "capabilities": capabilities,
+            }
+        )
 
     system_prompt = f"""
 You are AgentMind Runtime.
@@ -202,6 +322,10 @@ Rules:
 - Do not silently rewrite malformed math input into valid input.
 - If input is malformed or ambiguous, allow the tool validator to reject it.
 - If a math expression contains variables or '=', do not use calculator.
+- If another available agent has a better capability for the task, use delegate_task.
+- Do not delegate to yourself.
+- Use delegation only when it improves task execution.
+- Respect maximum delegation depth.
 """
 
     memory_block = "\n".join([f"- {memory}" for memory in memories]) or "No relevant memories found."
@@ -219,6 +343,9 @@ Task:
 
 Relevant memories already retrieved:
 {memory_block}
+
+Available agents for delegation:
+{json.dumps(agent_directory, indent=2)}
 """,
         },
     ]
@@ -262,10 +389,21 @@ Relevant memories already retrieved:
             tool_args["original_task"] = task
 
         try:
-            tool_result = run_registered_tool(
-                tool_name=tool_name,
-                input_data=tool_args,
-            )
+            if tool_name == "delegate_task":
+                tool_result = run_delegate_task(
+                    db=db,
+                    caller_agent=agent,
+                    target_agent_id=tool_args["target_agent_id"],
+                    task=tool_args["task"],
+                    reason=tool_args["reason"],
+                    delegation_depth=delegation_depth,
+                    max_delegation_depth=max_delegation_depth,
+                )
+            else:
+                tool_result = run_registered_tool(
+                    tool_name=tool_name,
+                    input_data=tool_args,
+                )
 
             tool_calls_log.append(
                 {
