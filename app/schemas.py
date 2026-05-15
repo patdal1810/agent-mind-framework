@@ -35,3 +35,18 @@ class StandardResponse(BaseModel):
     error: str | None = None
     trace_id: str
     latency_ms: int
+
+class AgentChatRequest(BaseModel):
+    task: str
+    save_result_to_memory: bool = False
+    memory_search_limit: int = 5
+
+class AgentChatResponse(BaseModel):
+    success: bool
+    task: str
+    response: str | None = None
+    memories_used: list[str] = Field(default_factory=list)
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    error: str | None = None
+    trace_id: str
+    latency_ms: int

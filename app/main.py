@@ -3,6 +3,8 @@ import time
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
 
+from app.agent_runtime import run_agent_runtime
+
 from app.audit import create_trace_id, write_audit_log
 from app.config import settings
 from app.database import Base, engine, SessionLocal
@@ -16,6 +18,7 @@ from app.schemas import (
     MemoryCreate,
     MemorySearch,
     ToolRunRequest,
+    AgentChatRequest,
 )
 from app.security import create_api_key, hash_api_key
 from app.tool_registry import run_registered_tool, seed_tools
@@ -63,6 +66,7 @@ def agent_manifest():
             "audit.logs",
             "rate.limits",
             "mcp.compatible",
+            "agent.runtime",
         ],
         "endpoints": {
             "register_agent": "/v1/agents/register",
@@ -71,6 +75,7 @@ def agent_manifest():
             "search_memory": "/v1/memories/search",
             "list_tools": "/v1/tools",
             "run_tool": "/v1/tools/{tool_name}/run",
+            "agent_chat": "/v1/agent/chat",
         },
     }
 
@@ -306,6 +311,61 @@ def run_tool(
             agent_id=agent.id,
             action=f"tool.run.{tool_name}",
             input_data=request.input,
+            output_data={"error": str(error)},
+            status="error",
+            trace_id=trace_id,
+        )
+
+        raise HTTPException(status_code=500, detail=str(error))
+    
+
+@app.post("/v1/agent/chat")
+def agent_chat(
+    request: AgentChatRequest,
+    db: Session = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    start = time.time()
+    trace_id = create_trace_id()
+
+    check_rate_limit(agent.id, agent.rate_limit_per_minute)
+
+    try:
+        result = run_agent_runtime(
+            db=db,
+            agent=agent,
+            task=request.task,
+            memory_search_limit=request.memory_search_limit,
+            save_result_to_memory=request.save_result_to_memory,
+        )
+
+        write_audit_log(
+            db=db,
+            agent_id=agent.id,
+            action="agent.chat",
+            input_data=request.model_dump(),
+            output_data=result,
+            status="success",
+            trace_id=trace_id,
+        )
+
+        return {
+            "success": True,
+            "task": request.task,
+            "response": result["response"],
+            "memories_used": result["memories_used"],
+            "tool_calls": result["tool_calls"],
+            "error": None,
+            "trace_id": trace_id,
+            "latency_ms": int((time.time() - start) * 1000),
+        }
+
+    except Exception as error:
+        write_audit_log(
+            db=db,
+            agent_id=agent.id,
+            action="agent.chat",
+            input_data=request.model_dump(),
             output_data={"error": str(error)},
             status="error",
             trace_id=trace_id,

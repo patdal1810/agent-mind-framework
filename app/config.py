@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     PUBLIC_BASE_URL: str = "http://localhost:8000"
     REGISTRATION_INVITE_CODE: str = "AGENTMIND-BETA-001"
 
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4.1-mini"
+    
     class Config:
         env_file = ".env"
 
