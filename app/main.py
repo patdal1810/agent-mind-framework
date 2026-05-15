@@ -379,3 +379,11 @@ def debug_env():
         "has_openai_key": bool(settings.OPENAI_API_KEY),
         "openai_model": settings.OPENAI_MODEL,
     }
+
+@app.get("/debug/raw")
+def debug_raw():
+    import os
+
+    return {
+        "raw_env": os.getenv("OPENAI_API_KEY"),
+    }
