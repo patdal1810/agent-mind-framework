@@ -21,7 +21,12 @@ from app.schemas import (
     AgentChatRequest,
 )
 from app.security import create_api_key, hash_api_key
-from app.tool_registry import run_registered_tool, seed_tools
+from app.tool_registry import (
+    get_tool_spec,
+    list_tool_specs,
+    run_registered_tool,
+    seed_tools,
+)
 
 
 Base.metadata.create_all(bind=engine)
@@ -67,6 +72,7 @@ def agent_manifest():
             "rate.limits",
             "mcp.compatible",
             "agent.runtime",
+            "tool_schema_registry",
         ],
         "endpoints": {
             "register_agent": "/v1/agents/register",
@@ -76,6 +82,7 @@ def agent_manifest():
             "list_tools": "/v1/tools",
             "run_tool": "/v1/tools/{tool_name}/run",
             "agent_chat": "/v1/agent/chat",
+            "get_tool_details": "/v1/tools/{tool_name}",
         },
     }
 
@@ -229,18 +236,63 @@ def list_tools(
 ):
     check_rate_limit(agent.id, agent.rate_limit_per_minute)
 
-    tools = db.query(Tool).filter(Tool.is_active == True).all()
+    db_tools = db.query(Tool).filter(Tool.is_active == True).all()
+    agent_permissions = [p.permission for p in agent.permissions]
+
+    result = []
+
+    for tool in db_tools:
+        spec = get_tool_spec(tool.name)
+
+        if not spec:
+            continue
+
+        result.append(
+            {
+                **spec,
+                "agent_has_permission": tool.permission_required in agent_permissions,
+            }
+        )
 
     return {
         "success": True,
-        "result": [
-            {
-                "name": tool.name,
-                "description": tool.description,
-                "permission_required": tool.permission_required,
-            }
-            for tool in tools
-        ],
+        "result": result,
+    }
+
+
+@app.get("/v1/tools/{tool_name}")
+def get_tool_details(
+    tool_name: str,
+    db: Session = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    check_rate_limit(agent.id, agent.rate_limit_per_minute)
+
+    tool = (
+        db.query(Tool)
+        .filter(
+            Tool.name == tool_name,
+            Tool.is_active == True,
+        )
+        .first()
+    )
+
+    if not tool:
+        raise HTTPException(status_code=404, detail="Tool not found")
+
+    spec = get_tool_spec(tool.name)
+
+    if not spec:
+        raise HTTPException(status_code=404, detail="Tool spec not found")
+
+    agent_permissions = [p.permission for p in agent.permissions]
+
+    return {
+        "success": True,
+        "result": {
+            **spec,
+            "agent_has_permission": tool.permission_required in agent_permissions,
+        },
     }
 
 
