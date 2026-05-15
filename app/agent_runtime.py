@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.memory_service import save_memory, search_memory
-from app.tool_registry import run_registered_tool
 from app.models import Agent, Tool
+from app.tool_registry import run_registered_tool
 
 
 def get_openai_client() -> OpenAI:
@@ -18,16 +18,6 @@ def get_openai_client() -> OpenAI:
 
 
 def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
-    """
-    This converts AgentMind tools into OpenAI tool definitions.
-
-    Important:
-    OpenAI does not directly run our Python tools.
-    It only decides which tool should be called and with what arguments.
-
-    Our backend still runs the real tool after checking permissions.
-    """
-
     db_tools = db.query(Tool).filter(Tool.is_active == True).all()
     agent_permissions = [p.permission for p in agent.permissions]
 
@@ -45,7 +35,8 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
                         "name": "calculator",
                         "description": (
                             "Use this only for pure numeric arithmetic. "
-                            "Do not use for equations, variables, roots, algebra, or expressions containing x or '='. "
+                            "Do not use for equations, variables, roots, algebra, "
+                            "or expressions containing x or '='. "
                             "Valid examples: 45 * 12, 6/7 + 5, (20 + 5) / 2."
                         ),
                         "parameters": {
@@ -53,7 +44,7 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
                             "properties": {
                                 "expression": {
                                     "type": "string",
-                                    "description": "Math expression. Example: 45 * 12",
+                                    "description": "Pure numeric arithmetic expression.",
                                 }
                             },
                             "required": ["expression"],
@@ -110,6 +101,7 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
                     },
                 }
             )
+
         elif tool.name == "quadratic_solver":
             runtime_tools.append(
                 {
@@ -119,7 +111,8 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
                         "description": (
                             "Use this only for regular quadratic equations in x. "
                             "The equation must look like ax^2 + bx + c = 0. "
-                            "Do not use this for ambiguous natural language, malformed equations, or non-quadratic expressions."
+                            "Do not use this for ambiguous natural language, malformed equations, "
+                            "or non-quadratic expressions."
                         ),
                         "parameters": {
                             "type": "object",
@@ -150,17 +143,6 @@ def run_agent_runtime(
     memory_search_limit: int = 5,
     save_result_to_memory: bool = False,
 ) -> dict[str, Any]:
-    """
-    This is the brain of AgentMind Runtime.
-
-    Flow:
-    1. Search memory first.
-    2. Send task + memory + tool definitions to OpenAI.
-    3. If OpenAI asks for a tool, run it.
-    4. Send tool result back to OpenAI.
-    5. Return final structured response.
-    """
-
     client = get_openai_client()
 
     memories = search_memory(
@@ -183,12 +165,15 @@ Current agent:
 - purpose: {agent.purpose}
 
 Rules:
-- Use available tools when they are useful.
+- Use available tools only when useful.
 - Use memories only when relevant.
 - Return clear, concise, machine-usable answers.
 - Do not pretend a tool was used if it was not used.
-- If a calculation is needed, use the calculator tool.
-- If stored context is needed, use memory_search.
+- For pure numeric arithmetic, use calculator.
+- For regular quadratic equations in x, use quadratic_solver.
+- Do not silently rewrite malformed math input into valid input.
+- If input is malformed or ambiguous, allow the tool validator to reject it.
+- If a math expression contains variables or '=', do not use calculator.
 """
 
     memory_block = "\n".join([f"- {memory}" for memory in memories]) or "No relevant memories found."
@@ -218,7 +203,6 @@ Relevant memories already retrieved:
     )
 
     assistant_message = first_response.choices[0].message
-
     tool_calls_log = []
 
     if not assistant_message.tool_calls:
@@ -245,6 +229,9 @@ Relevant memories already retrieved:
 
         if tool_name == "memory_search":
             tool_args["agent_id"] = agent.id
+
+        if tool_name == "quadratic_solver":
+            tool_args["original_task"] = task
 
         try:
             tool_result = run_registered_tool(
@@ -297,8 +284,9 @@ Relevant memories already retrieved:
                             "status": "failed",
                             "error": error_message,
                             "retry_hint": (
-                                "Explain the tool failure clearly. "
-                                "If possible, suggest the correct input format."
+                                "Explain the validation failure clearly. "
+                                "Do not solve malformed input. "
+                                "Suggest one corrected input format."
                             ),
                         }
                     ),
@@ -306,29 +294,30 @@ Relevant memories already retrieved:
             )
 
     messages.append(
-    {
-        "role": "system",
-        "content": """
-    When responding after tool execution:
+        {
+            "role": "system",
+            "content": """
+When responding after tool execution:
 
-    - If a tool failed validation, clearly explain the validation rule that failed.
-    - Do not try to solve malformed input.
-    - Do not say "I will proceed" unless another tool was actually called.
-    - Give one corrected example format.
-    - Keep the response useful for another AI agent or developer system.
+- If a tool succeeded, summarize the result clearly.
+- If a tool failed validation, clearly explain the validation rule that failed.
+- Do not try to solve malformed input.
+- Do not say "I will proceed" unless another tool was actually called.
+- Give one corrected example format when helpful.
+- Keep the response useful for another AI agent or developer system.
 
-    For calculator:
-    - It only accepts pure numeric arithmetic.
-    - It rejects variables, equations, words, and '='.
+For calculator:
+- It only accepts pure numeric arithmetic.
+- It rejects variables, equations, words, and '='.
 
-    For quadratic_solver:
-    - It only accepts regular quadratic equations in x.
-    - Required format: ax^2 + bx + c = 0.
-    - It rejects ambiguous wording like "raise to double power".
-    """
+For quadratic_solver:
+- It only accepts regular quadratic equations in x.
+- Required format: ax^2 + bx + c = 0.
+- It rejects ambiguous wording like "raise to double power".
+- It should not silently correct malformed equations.
+"""
         }
     )
-
 
     final_response = client.chat.completions.create(
         model=settings.OPENAI_MODEL,

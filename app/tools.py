@@ -1,13 +1,11 @@
 import numexpr as ne
-
-from app.memory_service import search_memory
-
 from sympy import Eq, symbols, solve
 from sympy.parsing.sympy_parser import (
     parse_expr,
     standard_transformations,
     implicit_multiplication_application,
 )
+
 from app.memory_service import search_memory
 from app.tool_validators import (
     validate_calculator_expression,
@@ -38,30 +36,23 @@ def calculator_tool(input_data: dict):
     }
 
 
-def memory_search_tool(input_data: dict):
-    agent_id = input_data.get("agent_id")
-    query = input_data.get("query")
-    limit = input_data.get("limit", 5)
-
-    if not agent_id:
-        raise ValueError("Missing agent_id")
-
-    if not query:
-        raise ValueError("Missing query")
-
-    memories = search_memory(
-        agent_id=agent_id,
-        query=query,
-        limit=limit,
-    )
-
-    return {
-        "memories": memories,
-    }
-
-
 def quadratic_solver_tool(input_data: dict):
     equation = input_data.get("equation")
+    original_task = input_data.get("original_task", "")
+
+    combined_input = f"{original_task} {equation}".lower()
+
+    if "double power" in combined_input:
+        raise ValueError(
+            "Invalid quadratic input. The phrase 'double power' is ambiguous. "
+            "Use clear format like: 2x^2 - 8x + 6 = 0."
+        )
+
+    if "raise to double" in combined_input:
+        raise ValueError(
+            "Invalid quadratic input. The phrase 'raise to double' is ambiguous. "
+            "Use clear format like: 2x^2 - 8x + 6 = 0."
+        )
 
     validation = validate_quadratic_equation(equation)
 
