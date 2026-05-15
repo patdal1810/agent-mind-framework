@@ -20,6 +20,7 @@ from app.schemas import (
     MemorySearch,
     ToolRunRequest,
     AgentChatRequest,
+    AgentDelegateRequest,
 )
 from app.security import create_api_key, hash_api_key
 from app.tool_registry import (
@@ -74,7 +75,8 @@ def agent_manifest():
             "mcp.compatible",
             "agent.runtime",
             "tool_schema_registry",
-            "agent.discovery"
+            "agent.discovery",
+            "agent.delegation",
         ],
         "endpoints": {
             "register_agent": "/v1/agents/register",
@@ -86,6 +88,7 @@ def agent_manifest():
             "agent_chat": "/v1/agent/chat",
             "get_tool_details": "/v1/tools/{tool_name}",
             "discover_agents": "/v1/agents/discover",
+            "delegate_agent": "/v1/agents/delegate",
         },
     }
 
@@ -472,3 +475,98 @@ def discover_agents(
         "success": True,
         "result": result,
     }
+
+
+@app.post("/v1/agents/delegate")
+def delegate_to_agent(
+    request: AgentDelegateRequest,
+    db: Session = Depends(get_db),
+    caller_agent: Agent = Depends(require_permission("agents:delegate")),
+):
+    """
+    Delegate a task from one agent to another.
+
+    The caller must have:
+    - agents:delegate
+
+    The task is executed as the target agent, meaning:
+    - target agent's memory is used
+    - target agent's permissions are used
+    - target agent's tools are used
+    """
+
+    start = time.time()
+    trace_id = create_trace_id()
+
+    check_rate_limit(
+        caller_agent.id,
+        caller_agent.rate_limit_per_minute,
+    )
+
+    target_agent = (
+        db.query(Agent)
+        .filter(
+            Agent.id == request.target_agent_id,
+            Agent.is_active == True,
+        )
+        .first()
+    )
+
+    if not target_agent:
+        raise HTTPException(
+            status_code=404,
+            detail="Target agent not found",
+        )
+
+    try:
+        result = run_agent_runtime(
+            db=db,
+            agent=target_agent,
+            task=request.task,
+            memory_search_limit=request.memory_search_limit,
+            save_result_to_memory=request.save_result_to_memory,
+        )
+
+        output = {
+            "caller_agent_id": caller_agent.id,
+            "target_agent_id": target_agent.id,
+            "target_agent_name": target_agent.name,
+            "task": request.task,
+            "response": result["response"],
+            "memories_used": result["memories_used"],
+            "tool_calls": result["tool_calls"],
+        }
+
+        write_audit_log(
+            db=db,
+            agent_id=caller_agent.id,
+            action="agent.delegate",
+            input_data=request.model_dump(),
+            output_data=output,
+            status="success",
+            trace_id=trace_id,
+        )
+
+        return {
+            "success": True,
+            "result": output,
+            "error": None,
+            "trace_id": trace_id,
+            "latency_ms": int((time.time() - start) * 1000),
+        }
+
+    except Exception as error:
+        write_audit_log(
+            db=db,
+            agent_id=caller_agent.id,
+            action="agent.delegate",
+            input_data=request.model_dump(),
+            output_data={"error": str(error)},
+            status="error",
+            trace_id=trace_id,
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error),
+        )
