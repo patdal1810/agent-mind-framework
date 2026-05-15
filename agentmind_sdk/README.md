@@ -212,4 +212,4 @@ python test_sdk.py
 
 # Author
 
-Built by Olumba Chidubem Patrick
+Built by Olumba C Patrick
