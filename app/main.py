@@ -87,6 +87,7 @@ def agent_manifest():
             "tool_schema_registry",
             "agent.discovery",
             "agent.delegation",
+            "task.history",
         ],
         "endpoints": {
             "register_agent": "/v1/agents/register",
@@ -99,6 +100,8 @@ def agent_manifest():
             "get_tool_details": "/v1/tools/{tool_name}",
             "discover_agents": "/v1/agents/discover",
             "delegate_agent": "/v1/agents/delegate",
+            "list_tasks": "/v1/tasks",
+            "get_task": "/v1/tasks/{task_id}",
         },
     }
 
@@ -604,3 +607,65 @@ def delegate_to_agent(
             status_code=500,
             detail=str(error),
         )
+    
+@app.get("/v1/tasks")
+def list_tasks(
+    status: str | None = None,
+    db: Session = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """
+    List task history for the current agent.
+
+    Shows tasks where the current agent was either:
+    - the caller
+    - the assigned worker
+    """
+
+    check_rate_limit(agent.id, agent.rate_limit_per_minute)
+
+    query = db.query(AgentTask).filter(
+        (AgentTask.assigned_agent_id == agent.id)
+        | (AgentTask.caller_agent_id == agent.id)
+    )
+
+    if status:
+        query = query.filter(AgentTask.status == status)
+
+    tasks = query.order_by(AgentTask.created_at.desc()).limit(50).all()
+
+    return {
+        "success": True,
+        "result": [serialize_task(task) for task in tasks],
+    }
+
+
+@app.get("/v1/tasks/{task_id}")
+def get_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """
+    Get one task record.
+
+    Agents can only view tasks they called or were assigned.
+    """
+
+    check_rate_limit(agent.id, agent.rate_limit_per_minute)
+
+    task = db.query(AgentTask).filter(AgentTask.id == task_id).first()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.assigned_agent_id != agent.id and task.caller_agent_id != agent.id:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have access to this task",
+        )
+
+    return {
+        "success": True,
+        "result": serialize_task(task),
+    }

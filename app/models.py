@@ -74,3 +74,23 @@ class AuditLog(Base):
     status = Column(String(40), nullable=False)
     trace_id = Column(String(120), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class AgentTask(Base):
+    __tablename__ = "agent_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    task = Column(Text, nullable=False)
+    status = Column(String(40), default="created")
+
+    caller_agent_id = Column(Integer, nullable=True)
+    assigned_agent_id = Column(Integer, nullable=False)
+
+    response = Column(Text, nullable=True)
+    tool_calls = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)
+
+    trace_id = Column(String(120), nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
