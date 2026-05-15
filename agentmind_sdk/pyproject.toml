@@ -9,12 +9,12 @@ description = "Python SDK for AgentMind agent infrastructure platform"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
-    { name = "Patrick Olumba" }
+    { name = "Olumba Chidubem Patrick" }
 ]
 dependencies = [
     "requests>=2.31.0"
 ]
 
 [project.urls]
-Homepage = "https://github.com/patdal1810/agentmind"
-Repository = "https://github.com/patdal1810/agentmind"
+Homepage = "https://github.com/patdal1810/agent-mind-apps"
+Repository = "https://github.com/patdal1810/agent-mind-apps"
