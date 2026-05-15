@@ -372,3 +372,10 @@ def agent_chat(
         )
 
         raise HTTPException(status_code=500, detail=str(error))
+    
+@app.get("/debug/env")
+def debug_env():
+    return {
+        "has_openai_key": bool(settings.OPENAI_API_KEY),
+        "openai_model": settings.OPENAI_MODEL,
+    }
