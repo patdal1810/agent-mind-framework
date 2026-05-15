@@ -36,7 +36,6 @@ from app.tool_registry import (
 )
 
 
-Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title=settings.APP_NAME)
 
