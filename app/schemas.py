@@ -63,3 +63,12 @@ class AgentDelegateRequest(BaseModel):
     task: str
     memory_search_limit: int = 5
     save_result_to_memory: bool = False
+
+class WorkflowCreateRequest(BaseModel):
+    objective: str
+
+
+class WorkflowResponse(BaseModel):
+    id: int
+    objective: str
+    status: str

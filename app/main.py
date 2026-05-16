@@ -10,7 +10,7 @@ from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.dependencies import get_current_agent, get_db, require_permission
 from app.memory_service import save_memory, search_memory
-from app.models import Agent, AgentPermission, AgentTask, AgentMessage, Tool
+from app.models import Agent, AgentPermission, AgentTask, AgentMessage, AgentWorkflow, Tool
 from app.rate_limit import check_rate_limit
 from app.schemas import (
     AgentChatRequest,
@@ -20,6 +20,7 @@ from app.schemas import (
     MemoryCreate,
     MemorySearch,
     ToolRunRequest,
+    WorkflowCreateRequest,
 )
 from app.security import create_api_key, hash_api_key
 from app.task_service import (
@@ -38,6 +39,15 @@ from app.tool_registry import (
 from app.message_service import (
     create_agent_message,
     serialize_agent_message,
+)
+
+from app.workflow_service import (
+    create_workflow,
+    get_workflow_context,
+    mark_workflow_completed,
+    mark_workflow_failed,
+    mark_workflow_running,
+    update_workflow_context,
 )
 
 
@@ -87,6 +97,7 @@ def agent_manifest():
             "rate.limits",
             "mcp.compatible",
             "agent.message_history",
+            "workflow.engine",
         ],
         "endpoints": {
             "register_agent": "/v1/agents/register",
@@ -102,7 +113,9 @@ def agent_manifest():
             "list_tasks": "/v1/tasks",
             "get_task": "/v1/tasks/{task_id}",
             "list_messages": "/v1/messages",
-            "get_message": "/v1/messages/{message_id}"
+            "get_message": "/v1/messages/{message_id}",
+            "create_workflow": "/v1/workflows",
+            "get_workflow": "/v1/workflows/{workflow_id}",
         },
     }
 
@@ -764,4 +777,60 @@ def get_agent_message(
     return {
         "success": True,
         "result": serialize_agent_message(message),
+    }
+
+
+@app.post("/v1/workflows")
+def create_new_workflow(
+    request: WorkflowCreateRequest,
+    db: Session = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    trace_id = create_trace_id()
+
+    workflow = create_workflow(
+        db=db,
+        objective=request.objective,
+        coordinator_agent_id=agent.id,
+        trace_id=trace_id,
+    )
+
+    return {
+        "success": True,
+        "result": {
+            "workflow_id": workflow.id,
+            "objective": workflow.objective,
+            "status": workflow.status,
+        },
+    }
+
+
+@app.get("/v1/workflows/{workflow_id}")
+def get_workflow(
+    workflow_id: int,
+    db: Session = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    workflow = (
+        db.query(AgentWorkflow)
+        .filter(AgentWorkflow.id == workflow_id)
+        .first()
+    )
+
+    if not workflow:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow not found",
+        )
+
+    return {
+        "success": True,
+        "result": {
+            "id": workflow.id,
+            "objective": workflow.objective,
+            "status": workflow.status,
+            "shared_context": get_workflow_context(workflow),
+            "created_at": workflow.created_at,
+            "updated_at": workflow.updated_at,
+        },
     }

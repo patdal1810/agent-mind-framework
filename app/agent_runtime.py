@@ -6,8 +6,12 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.memory_service import save_memory, search_memory
-from app.models import Agent, Tool
+from app.models import Agent, AgentWorkflow, Tool
 from app.tool_registry import run_registered_tool
+from app.workflow_service import (
+    get_workflow_context,
+    update_workflow_context,
+)
 
 
 def get_openai_client() -> OpenAI:
@@ -36,8 +40,7 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
                         "description": (
                             "Use this only for pure numeric arithmetic. "
                             "Do not use for equations, variables, roots, algebra, "
-                            "or expressions containing x or '='. "
-                            "Valid examples: 45 * 12, 6/7 + 5, (20 + 5) / 2."
+                            "or expressions containing x or '='."
                         ),
                         "parameters": {
                             "type": "object",
@@ -48,6 +51,31 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
                                 }
                             },
                             "required": ["expression"],
+                            "additionalProperties": False,
+                        },
+                    },
+                }
+            )
+
+        elif tool.name == "quadratic_solver":
+            runtime_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "quadratic_solver",
+                        "description": (
+                            "Use this only for regular quadratic equations in x. "
+                            "Required format: ax^2 + bx + c = 0."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "equation": {
+                                    "type": "string",
+                                    "description": "Example: x^2 - 5x + 6 = 0",
+                                }
+                            },
+                            "required": ["equation"],
                             "additionalProperties": False,
                         },
                     },
@@ -66,7 +94,7 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
                             "properties": {
                                 "query": {
                                     "type": "string",
-                                    "description": "Search query for memory retrieval.",
+                                    "description": "Search query.",
                                 },
                                 "limit": {
                                     "type": "integer",
@@ -80,58 +108,6 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
                 }
             )
 
-        elif tool.name == "echo":
-            runtime_tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "echo",
-                        "description": "Echoes back the provided input for testing.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "message": {
-                                    "type": "string",
-                                    "description": "Message to echo.",
-                                }
-                            },
-                            "required": ["message"],
-                            "additionalProperties": False,
-                        },
-                    },
-                }
-            )
-
-        elif tool.name == "quadratic_solver":
-            runtime_tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "quadratic_solver",
-                        "description": (
-                            "Use this only for regular quadratic equations in x. "
-                            "The equation must look like ax^2 + bx + c = 0. "
-                            "Do not use this for ambiguous natural language, malformed equations, "
-                            "or non-quadratic expressions."
-                        ),
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "equation": {
-                                    "type": "string",
-                                    "description": (
-                                        "A clean quadratic equation in x. "
-                                        "Valid example: x^2 - 5x + 6 = 0. "
-                                        "Invalid example: x raise to double power of 2."
-                                    ),
-                                }
-                            },
-                            "required": ["equation"],
-                            "additionalProperties": False,
-                        },
-                    },
-                }
-            )
         elif tool.name == "url_reader":
             runtime_tools.append(
                 {
@@ -139,8 +115,7 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
                     "function": {
                         "name": "url_reader",
                         "description": (
-                            "Use this to fetch and read text content from a public webpage URL. "
-                            "Use when a task asks to read, summarize, analyze, or extract information from a URL."
+                            "Fetch and read text content from a public webpage URL."
                         ),
                         "parameters": {
                             "type": "object",
@@ -160,6 +135,29 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
                     },
                 }
             )
+
+        elif tool.name == "echo":
+            runtime_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "echo",
+                        "description": "Echoes back provided input for testing.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "message": {
+                                    "type": "string",
+                                    "description": "Message to echo.",
+                                }
+                            },
+                            "required": ["message"],
+                            "additionalProperties": False,
+                        },
+                    },
+                }
+            )
+
         elif tool.name == "delegate_task":
             runtime_tools.append(
                 {
@@ -167,23 +165,23 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
                     "function": {
                         "name": "delegate_task",
                         "description": (
-                            "Delegate a task to another specialized agent. "
-                            "Use this when another agent has a better capability for the task."
+                            "Delegate a task to another specialized agent when that "
+                            "agent has a better capability for the task."
                         ),
                         "parameters": {
                             "type": "object",
                             "properties": {
                                 "target_agent_id": {
                                     "type": "integer",
-                                    "description": "The ID of the target agent to delegate to.",
+                                    "description": "ID of the target agent.",
                                 },
                                 "task": {
                                     "type": "string",
-                                    "description": "The task to delegate to the target agent.",
+                                    "description": "Task to delegate.",
                                 },
                                 "reason": {
                                     "type": "string",
-                                    "description": "Why this task should be delegated.",
+                                    "description": "Why delegation is useful.",
                                 },
                             },
                             "required": ["target_agent_id", "task", "reason"],
@@ -196,26 +194,45 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
     return runtime_tools
 
 
+def get_agent_directory(
+    db: Session,
+    current_agent: Agent,
+) -> list[dict[str, Any]]:
+    agents = db.query(Agent).filter(Agent.is_active == True).all()
+
+    directory = []
+
+    for agent in agents:
+        if agent.id == current_agent.id:
+            continue
+
+        try:
+            capabilities = json.loads(agent.capabilities or "[]")
+        except Exception:
+            capabilities = []
+
+        directory.append(
+            {
+                "id": agent.id,
+                "name": agent.name,
+                "purpose": agent.purpose,
+                "capabilities": capabilities,
+            }
+        )
+
+    return directory
+
+
 def run_delegate_task(
     db: Session,
     caller_agent: Agent,
     target_agent_id: int,
     task: str,
     reason: str,
+    workflow_id: int | None = None,
     delegation_depth: int = 0,
     max_delegation_depth: int = 2,
 ) -> dict[str, Any]:
-    """
-    Runs a delegated task as another agent.
-
-    Important:
-    The target agent uses its own:
-    - permissions
-    - tools
-    - memory
-    - identity
-    """
-
     caller_permissions = [p.permission for p in caller_agent.permissions]
 
     if "agents:delegate" not in caller_permissions:
@@ -223,7 +240,7 @@ def run_delegate_task(
 
     if delegation_depth >= max_delegation_depth:
         raise ValueError("Maximum delegation depth reached.")
-    
+
     if not task or not task.strip():
         raise ValueError("Delegated task cannot be empty.")
 
@@ -245,9 +262,44 @@ def run_delegate_task(
         task=task,
         memory_search_limit=5,
         save_result_to_memory=False,
+        workflow_id=workflow_id,
         delegation_depth=delegation_depth + 1,
         max_delegation_depth=max_delegation_depth,
     )
+
+    if workflow_id:
+        workflow = (
+            db.query(AgentWorkflow)
+            .filter(AgentWorkflow.id == workflow_id)
+            .first()
+        )
+
+        if workflow:
+            context_data = get_workflow_context(workflow)
+
+            context_data.setdefault("messages", []).append(
+                {
+                    "from": caller_agent.name,
+                    "to": target_agent.name,
+                    "task": task,
+                    "reason": reason,
+                    "response": result["response"],
+                }
+            )
+
+            context_data.setdefault("completed_steps", []).append(
+                {
+                    "agent": target_agent.name,
+                    "task": task,
+                    "response": result["response"],
+                }
+            )
+
+            update_workflow_context(
+                db=db,
+                workflow=workflow,
+                context_data=context_data,
+            )
 
     return {
         "target_agent_id": target_agent.id,
@@ -257,6 +309,7 @@ def run_delegate_task(
         "response": result["response"],
         "memories_used": result["memories_used"],
         "tool_calls": result["tool_calls"],
+        "workflow_id": workflow_id,
     }
 
 
@@ -266,6 +319,7 @@ def run_agent_runtime(
     task: str,
     memory_search_limit: int = 5,
     save_result_to_memory: bool = False,
+    workflow_id: int | None = None,
     delegation_depth: int = 0,
     max_delegation_depth: int = 2,
 ) -> dict[str, Any]:
@@ -278,28 +332,24 @@ def run_agent_runtime(
     )
 
     tools = build_runtime_tools(db=db, agent=agent)
+    agent_directory = get_agent_directory(db=db, current_agent=agent)
 
-    available_agents = db.query(Agent).filter(Agent.is_active == True).all()
+    workflow_context = {}
 
-    agent_directory = []
-
-    for available_agent in available_agents:
-        if available_agent.id == agent.id:
-            continue
-
-        try:
-            capabilities = json.loads(available_agent.capabilities or "[]")
-        except Exception:
-            capabilities = []
-
-        agent_directory.append(
-            {
-                "id": available_agent.id,
-                "name": available_agent.name,
-                "purpose": available_agent.purpose,
-                "capabilities": capabilities,
-            }
+    if workflow_id:
+        workflow = (
+            db.query(AgentWorkflow)
+            .filter(AgentWorkflow.id == workflow_id)
+            .first()
         )
+
+        if workflow:
+            workflow_context = get_workflow_context(workflow)
+
+    memory_block = (
+        "\n".join([f"- {memory}" for memory in memories])
+        or "No relevant memories found."
+    )
 
     system_prompt = f"""
 You are AgentMind Runtime.
@@ -319,16 +369,14 @@ Rules:
 - Do not pretend a tool was used if it was not used.
 - For pure numeric arithmetic, use calculator.
 - For regular quadratic equations in x, use quadratic_solver.
-- Do not silently rewrite malformed math input into valid input.
-- If input is malformed or ambiguous, allow the tool validator to reject it.
-- If a math expression contains variables or '=', do not use calculator.
+- If a task contains a URL and asks to read or summarize it, use url_reader.
 - If another available agent has a better capability for the task, use delegate_task.
 - Do not delegate to yourself.
-- Use delegation only when it improves task execution.
-- Respect maximum delegation depth.
+- Do not silently rewrite malformed math input into valid input.
+- If input is malformed or ambiguous, allow the tool validator to reject it.
+- Current delegation depth: {delegation_depth}
+- Maximum delegation depth: {max_delegation_depth}
 """
-
-    memory_block = "\n".join([f"- {memory}" for memory in memories]) or "No relevant memories found."
 
     messages = [
         {
@@ -341,11 +389,17 @@ Rules:
 Task:
 {task}
 
-Relevant memories already retrieved:
+Relevant memories:
 {memory_block}
 
 Available agents for delegation:
 {json.dumps(agent_directory, indent=2)}
+
+Workflow ID:
+{workflow_id}
+
+Shared workflow context:
+{json.dumps(workflow_context, indent=2)}
 """,
         },
     ]
@@ -396,6 +450,7 @@ Available agents for delegation:
                     target_agent_id=tool_args["target_agent_id"],
                     task=tool_args["task"],
                     reason=tool_args["reason"],
+                    workflow_id=workflow_id,
                     delegation_depth=delegation_depth,
                     max_delegation_depth=max_delegation_depth,
                 )
@@ -423,7 +478,8 @@ Available agents for delegation:
                         {
                             "status": "success",
                             "result": tool_result,
-                        }
+                        },
+                        default=str,
                     ),
                 }
             )
@@ -450,11 +506,11 @@ Available agents for delegation:
                             "status": "failed",
                             "error": error_message,
                             "retry_hint": (
-                                "Explain the validation failure clearly. "
-                                "Do not solve malformed input. "
-                                "Suggest one corrected input format."
+                                "Explain the validation or runtime failure clearly. "
+                                "Do not pretend the tool succeeded."
                             ),
-                        }
+                        },
+                        default=str,
                     ),
                 }
             )
@@ -464,24 +520,13 @@ Available agents for delegation:
             "role": "system",
             "content": """
 When responding after tool execution:
-
 - If a tool succeeded, summarize the result clearly.
-- If a tool failed validation, clearly explain the validation rule that failed.
-- Do not try to solve malformed input.
+- If a tool failed, explain the failure clearly.
+- If delegation happened, explain which agent handled the task.
+- If workflow context exists, mention only relevant workflow progress.
 - Do not say "I will proceed" unless another tool was actually called.
-- Give one corrected example format when helpful.
 - Keep the response useful for another AI agent or developer system.
-
-For calculator:
-- It only accepts pure numeric arithmetic.
-- It rejects variables, equations, words, and '='.
-
-For quadratic_solver:
-- It only accepts regular quadratic equations in x.
-- Required format: ax^2 + bx + c = 0.
-- It rejects ambiguous wording like "raise to double power".
-- It should not silently correct malformed equations.
-"""
+""",
         }
     )
 

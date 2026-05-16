@@ -113,3 +113,22 @@ class AgentMessage(Base):
     trace_id = Column(String(120), nullable=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AgentWorkflow(Base):
+    __tablename__ = "agent_workflows"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    objective = Column(Text, nullable=False)
+
+    status = Column(String(40), default="created")
+
+    coordinator_agent_id = Column(Integer, nullable=False)
+
+    shared_context = Column(Text, nullable=True)
+
+    trace_id = Column(String(120), nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
