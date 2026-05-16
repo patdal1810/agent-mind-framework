@@ -95,3 +95,21 @@ class AgentTask(Base):
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AgentMessage(Base):
+    __tablename__ = "agent_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    sender_agent_id = Column(Integer, nullable=False)
+    receiver_agent_id = Column(Integer, nullable=False)
+
+    task_id = Column(Integer, nullable=True)
+
+    message_type = Column(String(50), default="task")
+    content = Column(Text, nullable=False)
+
+    trace_id = Column(String(120), nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)

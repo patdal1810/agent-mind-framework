@@ -10,7 +10,7 @@ from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.dependencies import get_current_agent, get_db, require_permission
 from app.memory_service import save_memory, search_memory
-from app.models import Agent, AgentPermission, AgentTask, Tool
+from app.models import Agent, AgentPermission, AgentTask, AgentMessage, Tool
 from app.rate_limit import check_rate_limit
 from app.schemas import (
     AgentChatRequest,
@@ -35,6 +35,10 @@ from app.tool_registry import (
     seed_tools,
 )
 
+from app.message_service import (
+    create_agent_message,
+    serialize_agent_message,
+)
 
 
 app = FastAPI(title=settings.APP_NAME)
@@ -82,6 +86,7 @@ def agent_manifest():
             "audit.logs",
             "rate.limits",
             "mcp.compatible",
+            "agent.message_history",
         ],
         "endpoints": {
             "register_agent": "/v1/agents/register",
@@ -96,6 +101,8 @@ def agent_manifest():
             "agent_chat": "/v1/agent/chat",
             "list_tasks": "/v1/tasks",
             "get_task": "/v1/tasks/{task_id}",
+            "list_messages": "/v1/messages",
+            "get_message": "/v1/messages/{message_id}"
         },
     }
 
@@ -231,6 +238,16 @@ def delegate_to_agent(
         trace_id=trace_id,
     )
 
+    create_agent_message(
+        db=db,
+        sender_agent_id=caller_agent.id,
+        receiver_agent_id=target_agent.id,
+        task_id=task_record.id,
+        message_type="task",
+        content=request.task,
+        trace_id=trace_id,
+    )
+
     mark_task_running(db=db, task_record=task_record)
 
     try:
@@ -259,6 +276,16 @@ def delegate_to_agent(
             "memories_used": result["memories_used"],
             "tool_calls": result["tool_calls"],
         }
+
+        create_agent_message(
+            db=db,
+            sender_agent_id=target_agent.id,
+            receiver_agent_id=caller_agent.id,
+            task_id=task_record.id,
+            message_type="result",
+            content=result["response"],
+            trace_id=trace_id,
+        )
 
         write_audit_log(
             db=db,
@@ -292,6 +319,16 @@ def delegate_to_agent(
             input_data=request.model_dump(),
             output_data={"error": str(error)},
             status="error",
+            trace_id=trace_id,
+        )
+
+        create_agent_message(
+            db=db,
+            sender_agent_id=target_agent.id,
+            receiver_agent_id=caller_agent.id,
+            task_id=task_record.id,
+            message_type="error",
+            content=str(error),
             trace_id=trace_id,
         )
 
@@ -647,4 +684,84 @@ def get_task(
     return {
         "success": True,
         "result": serialize_task(task),
+    }
+
+
+@app.get("/v1/messages")
+def list_agent_messages(
+    task_id: int | None = None,
+    db: Session = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """
+    List messages involving the current agent.
+
+    Optional:
+    - filter by task_id
+    """
+
+    check_rate_limit(agent.id, agent.rate_limit_per_minute)
+
+    query = db.query(AgentMessage).filter(
+        (AgentMessage.sender_agent_id == agent.id)
+        | (AgentMessage.receiver_agent_id == agent.id)
+    )
+
+    if task_id:
+        query = query.filter(AgentMessage.task_id == task_id)
+
+    messages = (
+        query
+        .order_by(AgentMessage.created_at.desc())
+        .limit(100)
+        .all()
+    )
+
+    return {
+        "success": True,
+        "result": [
+            serialize_agent_message(message)
+            for message in messages
+        ],
+    }
+
+
+@app.get("/v1/messages/{message_id}")
+def get_agent_message(
+    message_id: int,
+    db: Session = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """
+    Get one message.
+
+    Agents can only view messages they sent or received.
+    """
+
+    check_rate_limit(agent.id, agent.rate_limit_per_minute)
+
+    message = (
+        db.query(AgentMessage)
+        .filter(AgentMessage.id == message_id)
+        .first()
+    )
+
+    if not message:
+        raise HTTPException(
+            status_code=404,
+            detail="Message not found",
+        )
+
+    if (
+        message.sender_agent_id != agent.id
+        and message.receiver_agent_id != agent.id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have access to this message",
+        )
+
+    return {
+        "success": True,
+        "result": serialize_agent_message(message),
     }
