@@ -47,6 +47,7 @@ class AgentChatRequest(BaseModel):
     task: str
     save_result_to_memory: bool = False
     memory_search_limit: int = 5
+    workflow_id: int | None = None
 
 class AgentChatResponse(BaseModel):
     success: bool

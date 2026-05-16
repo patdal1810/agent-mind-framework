@@ -600,6 +600,7 @@ def agent_chat(
             task=request.task,
             memory_search_limit=request.memory_search_limit,
             save_result_to_memory=request.save_result_to_memory,
+            workflow_id=request.workflow_id,
         )
 
         mark_task_completed(
@@ -629,6 +630,7 @@ def agent_chat(
             "error": None,
             "trace_id": trace_id,
             "latency_ms": int((time.time() - start) * 1000),
+            "workflow_id": request.workflow_id,
         }
 
     except Exception as error:
