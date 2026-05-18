@@ -3,6 +3,8 @@ from sympy import Eq, symbols, solve
 import requests
 from bs4 import BeautifulSoup
 
+import feedparser
+
 from sympy.parsing.sympy_parser import (
     parse_expr,
     standard_transformations,
@@ -154,3 +156,70 @@ def url_reader_tool(input_data: dict):
         "truncated": len(text) > max_chars,
         "content_length": len(text),
     }
+
+
+from urllib.parse import urljoin, urlparse
+
+import feedparser
+
+
+def discover_feed_urls(site_url: str) -> list[str]:
+    parsed = urlparse(site_url)
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
+
+    return [
+        site_url,
+        urljoin(base_url, "/feed/"),
+        urljoin(base_url, "/rss/"),
+        urljoin(base_url, "/rss.xml"),
+        urljoin(base_url, "/atom.xml"),
+        urljoin(base_url, "/feed.xml"),
+    ]
+
+
+def rss_reader_tool(input_data: dict):
+    url = input_data.get("url") or input_data.get("feed_url")
+    limit = input_data.get("limit", 5)
+
+    validation = validate_url(url)
+
+    if not validation.is_valid:
+        raise ValueError(validation.error)
+
+    candidate_urls = discover_feed_urls(validation.cleaned_input)
+
+    last_error = None
+
+    for candidate_url in candidate_urls:
+        feed = feedparser.parse(candidate_url)
+
+        if feed.bozo:
+            last_error = f"Could not parse feed at {candidate_url}"
+            continue
+
+        if not feed.entries:
+            last_error = f"No entries found at {candidate_url}"
+            continue
+
+        entries = []
+
+        for entry in feed.entries[:limit]:
+            entries.append(
+                {
+                    "title": entry.get("title"),
+                    "link": entry.get("link"),
+                    "summary": entry.get("summary"),
+                    "published": entry.get("published"),
+                }
+            )
+
+        return {
+            "source_url": validation.cleaned_input,
+            "feed_url": candidate_url,
+            "feed_title": feed.feed.get("title"),
+            "entries": entries,
+        }
+
+    raise ValueError(
+        f"No valid RSS feed found for URL. Last error: {last_error}"
+    )

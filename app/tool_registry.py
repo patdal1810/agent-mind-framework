@@ -7,6 +7,8 @@ from app.tools import (
     echo_tool,
     memory_search_tool,
     quadratic_solver_tool,
+    url_reader_tool,
+    rss_reader_tool,
 )
 
 
@@ -15,7 +17,8 @@ TOOL_FUNCTIONS = {
     "memory_search": memory_search_tool,
     "echo": echo_tool,
     "quadratic_solver": quadratic_solver_tool,
-    "url_reader": url_reader_tool
+    "url_reader": url_reader_tool,
+    "rss_reader": rss_reader_tool,
 }
 
 
@@ -294,6 +297,61 @@ TOOL_SPECS = {
                     "status": "success",
                 }
             ],
+        },
+    },
+    "rss_reader": {
+        "name": "rss_reader",
+        "description": "Discovers and reads RSS/Atom feeds from websites that support feeds.",
+        "permission_required": "tools:rss_reader:run",
+        "input_schema": {
+            "type": "object",
+            "required": ["url"],
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "Website URL or direct RSS/Atom feed URL.",
+                    "example": "https://example.com",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum feed entries to return.",
+                    "example": 5,
+                },
+            },
+        },
+        "validation_rules": [
+            "URL must start with http:// or https://.",
+            "URL can be a website homepage or a direct RSS/Atom feed.",
+            "Tool tries common feed paths automatically.",
+            "If no feed exists, the tool returns a structured failure.",
+        ],
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "source_url": "string",
+                "feed_url": "string",
+                "feed_title": "string",
+                "entries": ["object"],
+            },
+        },
+        "example_request": {
+            "input": {
+                "url": "https://example.com",
+                "limit": 5
+            }
+        },
+        "example_response": {
+            "source_url": "https://example.com",
+            "feed_url": "https://example.com/feed/",
+            "feed_title": "Example Feed",
+            "entries": [
+                {
+                    "title": "Example title",
+                    "link": "https://example.com/article",
+                    "summary": "Example summary",
+                    "published": "Example date"
+                }
+            ]
         },
     },
 }

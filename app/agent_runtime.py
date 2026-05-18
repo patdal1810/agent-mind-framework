@@ -200,6 +200,34 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
                     },
                 }
             )
+        elif tool.name == "rss_reader":
+            runtime_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "rss_reader",
+                        "description": (
+                            "Discover and read RSS/Atom feeds from websites that support feeds. "
+                            "Use this when direct URL reading fails or when the task asks for latest posts/news from a website."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "url": {
+                                    "type": "string",
+                                    "description": "Website URL or direct RSS/Atom feed URL.",
+                                },
+                                "limit": {
+                                    "type": "integer",
+                                    "description": "Maximum feed entries to return.",
+                                },
+                            },
+                            "required": ["url"],
+                            "additionalProperties": False,
+                        },
+                    },
+                }
+            )
 
     return runtime_tools
 
@@ -384,6 +412,9 @@ Rules:
 - If url_reader is available and the task contains a URL, prefer url_reader over memory_search.
 - memory_search should not replace url_reader for webpage tasks.
 - If another available agent has a better capability for the task, use delegate_task.
+- If url_reader fails because a site blocks direct fetching, and rss_reader is available, use rss_reader with the same website URL.
+- For latest news, latest posts, blogs, or site updates, prefer rss_reader when the website supports RSS/Atom feeds.
+- Never hardcode one website's feed path. Let rss_reader discover common feed paths automatically.
 - Do not delegate to yourself.
 - Do not silently rewrite malformed math input into valid input.
 - If input is malformed or ambiguous, allow the tool validator to reject it.
