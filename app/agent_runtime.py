@@ -1,6 +1,8 @@
 import json
 from typing import Any
 
+import re
+
 from openai import OpenAI
 from sqlalchemy.orm import Session
 
@@ -13,6 +15,14 @@ from app.workflow_service import (
     update_workflow_context,
 )
 
+
+def task_contains_url(task: str) -> bool:
+    return bool(
+        re.search(
+            r"https?://[^\s]+",
+            task,
+        )
+    )
 
 def get_openai_client() -> OpenAI:
     if not settings.OPENAI_API_KEY:
@@ -369,7 +379,10 @@ Rules:
 - Do not pretend a tool was used if it was not used.
 - For pure numeric arithmetic, use calculator.
 - For regular quadratic equations in x, use quadratic_solver.
-- If a task contains a URL and asks to read or summarize it, use url_reader.
+- If the task contains a URL and asks to read, research, summarize, extract, analyze, or review it, you MUST call url_reader before answering.
+- Never say "I will read" or "I will summarize" unless url_reader was actually called successfully.
+- If url_reader is available and the task contains a URL, prefer url_reader over memory_search.
+- memory_search should not replace url_reader for webpage tasks.
 - If another available agent has a better capability for the task, use delegate_task.
 - Do not delegate to yourself.
 - Do not silently rewrite malformed math input into valid input.
@@ -404,11 +417,28 @@ Shared workflow context:
         },
     ]
 
+    tool_choice = "auto"
+
+    if task_contains_url(task):
+        tool_names = [
+            tool["function"]["name"]
+            for tool in tools
+            if tool.get("type") == "function"
+        ]
+
+        if "url_reader" in tool_names:
+            tool_choice = {
+                "type": "function",
+                "function": {
+                    "name": "url_reader"
+                }
+            }
+
     first_response = client.chat.completions.create(
         model=settings.OPENAI_MODEL,
         messages=messages,
         tools=tools,
-        tool_choice="auto",
+        tool_choice=tool_choice,
     )
 
     assistant_message = first_response.choices[0].message
