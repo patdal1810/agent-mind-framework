@@ -116,10 +116,21 @@ def url_reader_tool(input_data: dict):
     try:
         response = requests.get(
             validation.cleaned_input,
-            timeout=10,
+            timeout=15,
             headers={
-                "User-Agent": "AgentMindBot/0.1"
-            }
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0 Safari/537.36"
+                ),
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;"
+                    "q=0.9,image/avif,image/webp,*/*;q=0.8"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+            },
         )
         response.raise_for_status()
 
