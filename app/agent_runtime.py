@@ -531,6 +531,39 @@ Shared workflow context:
                 }
             )
 
+            if workflow_id:
+                workflow = (
+                    db.query(AgentWorkflow)
+                    .filter(AgentWorkflow.id == workflow_id)
+                    .first()
+                )
+
+                if workflow:
+                    context_data = get_workflow_context(workflow)
+
+                    context_data.setdefault("messages", []).append(
+                        {
+                            "agent": agent.name,
+                            "tool": tool_name,
+                            "task": task,
+                            "status": "success",
+                        }
+                    )
+
+                    context_data.setdefault("completed_steps", []).append(
+                        {
+                            "agent": agent.name,
+                            "tool": tool_name,
+                            "task": task,
+                        }
+                    )
+
+                    update_workflow_context(
+                        db=db,
+                        workflow=workflow,
+                        context_data=context_data,
+                    )
+
             messages.append(
                 {
                     "role": "tool",
@@ -557,6 +590,32 @@ Shared workflow context:
                     "error": error_message,
                 }
             )
+
+            if workflow_id:
+                workflow = (
+                    db.query(AgentWorkflow)
+                    .filter(AgentWorkflow.id == workflow_id)
+                    .first()
+                )
+
+                if workflow:
+                    context_data = get_workflow_context(workflow)
+
+                    context_data.setdefault("messages", []).append(
+                        {
+                            "agent": agent.name,
+                            "tool": tool_name,
+                            "task": task,
+                            "status": "failed",
+                            "error": error_message,
+                        }
+                    )
+
+                    update_workflow_context(
+                        db=db,
+                        workflow=workflow,
+                        context_data=context_data,
+                    )
 
             messages.append(
                 {
