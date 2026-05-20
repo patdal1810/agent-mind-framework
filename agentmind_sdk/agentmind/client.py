@@ -102,10 +102,7 @@ class AgentMindClient:
                 "Invalid JSON response from AgentMind API."
             ) from error
 
-    # ---------------------------------------------------------
     # HEALTH / MANIFEST
-    # ---------------------------------------------------------
-
     def health_check(self) -> dict[str, Any]:
         """
         Check if the AgentMind API is reachable.
@@ -142,10 +139,8 @@ class AgentMindClient:
             auth_required=False,
         )
 
-    # ---------------------------------------------------------
-    # AGENT MANAGEMENT
-    # ---------------------------------------------------------
 
+    # AGENT MANAGEMENT
     def register_agent(
         self,
         name: str,
@@ -240,10 +235,7 @@ class AgentMindClient:
             },
         )
 
-    # ---------------------------------------------------------
     # MEMORY
-    # ---------------------------------------------------------
-
     def save_memory(
         self,
         content: str,
@@ -278,10 +270,8 @@ class AgentMindClient:
             },
         )
 
-    # ---------------------------------------------------------
+   
     # TOOLS
-    # ---------------------------------------------------------
-
     def list_tools(self) -> dict[str, Any]:
         """
         List all available tools with schemas and validation rules.
@@ -330,15 +320,14 @@ class AgentMindClient:
             },
         )
 
-    # ---------------------------------------------------------
-    # RUNTIME
-    # ---------------------------------------------------------
 
+    # RUNTIME
     def chat(
         self,
         task: str,
         memory_search_limit: int = 5,
         save_result_to_memory: bool = False,
+        workflow_id: int | None = None,
     ) -> dict[str, Any]:
         """
         Send task to AgentMind Runtime.
@@ -349,22 +338,26 @@ class AgentMindClient:
         - tool selection
         - tool execution
         - delegation
+        - workflow context when workflow_id is provided
         """
+
+        payload = {
+            "task": task,
+            "memory_search_limit": memory_search_limit,
+            "save_result_to_memory": save_result_to_memory,
+        }
+
+        if workflow_id is not None:
+            payload["workflow_id"] = workflow_id
 
         return self._request(
             method="POST",
             path="/v1/agent/chat",
-            json_data={
-                "task": task,
-                "memory_search_limit": memory_search_limit,
-                "save_result_to_memory": save_result_to_memory,
-            },
+            json_data=payload,
         )
 
-    # ---------------------------------------------------------
-    # TASK HISTORY
-    # ---------------------------------------------------------
 
+    # TASK HISTORY
     def list_tasks(
         self,
         status: str | None = None,
@@ -400,4 +393,58 @@ class AgentMindClient:
         return self._request(
             method="GET",
             path=f"/v1/tasks/{task_id}",
+        )
+    
+
+    # Create workflow
+    def create_workflow(self, objective: str) -> dict[str, Any]:
+        """
+        Create a shared workflow context.
+
+        A workflow lets multiple agents work under the same objective.
+        """
+        return self._request(
+            method="POST",
+            path="/v1/workflows",
+            json_data={"objective": objective},
+        )
+
+    # Get workflow
+    def get_workflow(self, workflow_id: int) -> dict[str, Any]:
+        """
+        Get workflow status and shared context.
+        """
+        return self._request(
+            method="GET",
+            path=f"/v1/workflows/{workflow_id}",
+        )
+
+    # list message
+    def list_messages(
+        self,
+        task_id: int | None = None,
+    ) -> dict[str, Any]:
+        """
+        List agent-to-agent messages.
+
+        If task_id is provided, messages are filtered to that task.
+        """
+        path = "/v1/messages"
+
+        if task_id:
+            path += f"?task_id={task_id}"
+
+        return self._request(
+            method="GET",
+            path=path,
+        )
+
+    # Get messages from agent
+    def get_message(self, message_id: int) -> dict[str, Any]:
+        """
+        Get one agent message.
+        """
+        return self._request(
+            method="GET",
+            path=f"/v1/messages/{message_id}",
         )
