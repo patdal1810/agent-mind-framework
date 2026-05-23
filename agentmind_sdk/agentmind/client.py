@@ -272,6 +272,46 @@ class AgentMindClient:
 
    
     # TOOLS
+    def register_tool(
+        self,
+        name: str,
+        description: str,
+        permission_required: str,
+        input_schema: dict[str, Any],
+        validation_rules: list[str] | dict[str, Any] | None = None,
+        example_request: dict[str, Any] | None = None,
+        is_webhook: bool = False,
+        webhook_url: str | None = None,
+        webhook_method: str = "POST",
+        webhook_headers: dict[str, Any] | None = None,
+        webhook_timeout_seconds: int = 30,
+    ) -> dict[str, Any]:
+        """
+        Register or update a tool.
+
+        Supports:
+        - internal tool metadata
+        - webhook tools
+        """
+
+        return self._request(
+            method="POST",
+            path="/v1/tools/register",
+            json_data={
+                "name": name,
+                "description": description,
+                "permission_required": permission_required,
+                "input_schema": input_schema,
+                "validation_rules": validation_rules or [],
+                "example_request": example_request or {},
+                "is_webhook": is_webhook,
+                "webhook_url": webhook_url,
+                "webhook_method": webhook_method,
+                "webhook_headers": webhook_headers or {},
+                "webhook_timeout_seconds": webhook_timeout_seconds,
+            },
+        )
+    
     def list_tools(self) -> dict[str, Any]:
         """
         List all available tools with schemas and validation rules.
@@ -356,6 +396,23 @@ class AgentMindClient:
             json_data=payload,
         )
 
+    def run_task(
+        self,
+        task: str,
+        memory_search_limit: int = 5,
+        save_result_to_memory: bool = False,
+        workflow_id: int | None = None,
+    ) -> dict[str, Any]:
+        """
+        Alias for chat().
+        """
+
+        return self.chat(
+            task=task,
+            memory_search_limit=memory_search_limit,
+            save_result_to_memory=save_result_to_memory,
+            workflow_id=workflow_id,
+        )
 
     # TASK HISTORY
     def list_tasks(
@@ -448,3 +505,4 @@ class AgentMindClient:
             method="GET",
             path=f"/v1/messages/{message_id}",
         )
+    
