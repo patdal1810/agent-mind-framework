@@ -8,6 +8,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    JSON
 )
 from sqlalchemy.orm import relationship
 
@@ -55,13 +56,26 @@ class Memory(Base):
 class Tool(Base):
     __tablename__ = "tools"
 
-    id = Column(Integer, primary_key=True)
-    name = Column(String(120), unique=True, nullable=False)
-    description = Column(Text, nullable=False)
-    permission_required = Column(String(120), nullable=False)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id = Column(Integer, primary_key=True, index=True)
 
+    name = Column(String, unique=True, nullable=False)
+    description = Column(Text, nullable=False)
+    permission_required = Column(String, nullable=False)
+
+    input_schema = Column(JSON, nullable=False)
+    validation_rules = Column(JSON, nullable=True)
+    output_schema = Column(JSON, nullable=True)
+    example_request = Column(JSON, nullable=True)
+    example_response = Column(JSON, nullable=True)
+
+    is_active = Column(Boolean, default=True)
+
+    is_webhook = Column(Boolean, default=False)
+    webhook_url = Column(Text, nullable=True)
+    webhook_method = Column(String, default="POST")
+    webhook_headers = Column(JSON, nullable=True)
+    webhook_timeout_seconds = Column(Integer, default=30)
+    
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"

@@ -1,13 +1,13 @@
 import json
-from typing import Any
-
 import re
+from typing import Any
 
 from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.memory_service import save_memory, search_memory
+from app.message_service import create_agent_message
 from app.models import Agent, AgentWorkflow, Tool
 from app.tool_registry import run_registered_tool
 from app.workflow_service import (
@@ -17,12 +17,8 @@ from app.workflow_service import (
 
 
 def task_contains_url(task: str) -> bool:
-    return bool(
-        re.search(
-            r"https?://[^\s]+",
-            task,
-        )
-    )
+    return bool(re.search(r"https?://[^\s]+", task))
+
 
 def get_openai_client() -> OpenAI:
     if not settings.OPENAI_API_KEY:
@@ -31,9 +27,73 @@ def get_openai_client() -> OpenAI:
     return OpenAI(api_key=settings.OPENAI_API_KEY)
 
 
-def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
-    db_tools = db.query(Tool).filter(Tool.is_active == True).all()
-    agent_permissions = [p.permission for p in agent.permissions]
+def get_workflow(
+    db: Session,
+    workflow_id: int | None,
+) -> AgentWorkflow | None:
+    if not workflow_id:
+        return None
+
+    return (
+        db.query(AgentWorkflow)
+        .filter(AgentWorkflow.id == workflow_id)
+        .first()
+    )
+
+
+def set_workflow_status(
+    db: Session,
+    workflow_id: int | None,
+    status: str,
+) -> None:
+    workflow = get_workflow(db, workflow_id)
+
+    if not workflow:
+        return
+
+    workflow.status = status
+    db.commit()
+
+
+def add_workflow_event(
+    db: Session,
+    workflow_id: int | None,
+    event: dict[str, Any],
+    completed: bool = False,
+) -> None:
+    workflow = get_workflow(db, workflow_id)
+
+    if not workflow:
+        return
+
+    context_data = get_workflow_context(workflow)
+
+    context_data.setdefault("messages", []).append(event)
+
+    if completed:
+        context_data.setdefault("completed_steps", []).append(event)
+
+    update_workflow_context(
+        db=db,
+        workflow=workflow,
+        context_data=context_data,
+    )
+
+
+def build_runtime_tools(
+    db: Session,
+    agent: Agent,
+) -> list[dict[str, Any]]:
+    db_tools = (
+        db.query(Tool)
+        .filter(Tool.is_active == True)
+        .all()
+    )
+
+    agent_permissions = [
+        permission.permission
+        for permission in agent.permissions
+    ]
 
     runtime_tools = []
 
@@ -41,193 +101,16 @@ def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
         if tool.permission_required not in agent_permissions:
             continue
 
-        if tool.name == "calculator":
-            runtime_tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "calculator",
-                        "description": (
-                            "Use this only for pure numeric arithmetic. "
-                            "Do not use for equations, variables, roots, algebra, "
-                            "or expressions containing x or '='."
-                        ),
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "expression": {
-                                    "type": "string",
-                                    "description": "Pure numeric arithmetic expression.",
-                                }
-                            },
-                            "required": ["expression"],
-                            "additionalProperties": False,
-                        },
-                    },
-                }
-            )
-
-        elif tool.name == "quadratic_solver":
-            runtime_tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "quadratic_solver",
-                        "description": (
-                            "Use this only for regular quadratic equations in x. "
-                            "Required format: ax^2 + bx + c = 0."
-                        ),
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "equation": {
-                                    "type": "string",
-                                    "description": "Example: x^2 - 5x + 6 = 0",
-                                }
-                            },
-                            "required": ["equation"],
-                            "additionalProperties": False,
-                        },
-                    },
-                }
-            )
-
-        elif tool.name == "memory_search":
-            runtime_tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "memory_search",
-                        "description": "Search this agent's stored memories.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "query": {
-                                    "type": "string",
-                                    "description": "Search query.",
-                                },
-                                "limit": {
-                                    "type": "integer",
-                                    "description": "Maximum memories to return.",
-                                },
-                            },
-                            "required": ["query"],
-                            "additionalProperties": False,
-                        },
-                    },
-                }
-            )
-
-        elif tool.name == "url_reader":
-            runtime_tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "url_reader",
-                        "description": (
-                            "Fetch and read text content from a public webpage URL."
-                        ),
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "url": {
-                                    "type": "string",
-                                    "description": "A public URL starting with http:// or https://.",
-                                },
-                                "max_chars": {
-                                    "type": "integer",
-                                    "description": "Maximum text characters to return.",
-                                },
-                            },
-                            "required": ["url"],
-                            "additionalProperties": False,
-                        },
-                    },
-                }
-            )
-
-        elif tool.name == "echo":
-            runtime_tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "echo",
-                        "description": "Echoes back provided input for testing.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "message": {
-                                    "type": "string",
-                                    "description": "Message to echo.",
-                                }
-                            },
-                            "required": ["message"],
-                            "additionalProperties": False,
-                        },
-                    },
-                }
-            )
-
-        elif tool.name == "delegate_task":
-            runtime_tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "delegate_task",
-                        "description": (
-                            "Delegate a task to another specialized agent when that "
-                            "agent has a better capability for the task."
-                        ),
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "target_agent_id": {
-                                    "type": "integer",
-                                    "description": "ID of the target agent.",
-                                },
-                                "task": {
-                                    "type": "string",
-                                    "description": "Task to delegate.",
-                                },
-                                "reason": {
-                                    "type": "string",
-                                    "description": "Why delegation is useful.",
-                                },
-                            },
-                            "required": ["target_agent_id", "task", "reason"],
-                            "additionalProperties": False,
-                        },
-                    },
-                }
-            )
-        elif tool.name == "rss_reader":
-            runtime_tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "rss_reader",
-                        "description": (
-                            "Discover and read RSS/Atom feeds from websites that support feeds. "
-                            "Use this when direct URL reading fails or when the task asks for latest posts/news from a website."
-                        ),
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "url": {
-                                    "type": "string",
-                                    "description": "Website URL or direct RSS/Atom feed URL.",
-                                },
-                                "limit": {
-                                    "type": "integer",
-                                    "description": "Maximum feed entries to return.",
-                                },
-                            },
-                            "required": ["url"],
-                            "additionalProperties": False,
-                        },
-                    },
-                }
-            )
+        runtime_tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.input_schema,
+                },
+            }
+        )
 
     return runtime_tools
 
@@ -236,7 +119,11 @@ def get_agent_directory(
     db: Session,
     current_agent: Agent,
 ) -> list[dict[str, Any]]:
-    agents = db.query(Agent).filter(Agent.is_active == True).all()
+    agents = (
+        db.query(Agent)
+        .filter(Agent.is_active == True)
+        .all()
+    )
 
     directory = []
 
@@ -269,18 +156,20 @@ def run_delegate_task(
     reason: str,
     workflow_id: int | None = None,
     delegation_depth: int = 0,
-    max_delegation_depth: int = 2,
+    max_delegation_depth: int = 3,
 ) -> dict[str, Any]:
-    caller_permissions = [p.permission for p in caller_agent.permissions]
+    caller_permissions = [
+        permission.permission
+        for permission in caller_agent.permissions
+    ]
 
     if "agents:delegate" not in caller_permissions:
-        raise ValueError("Caller agent does not have agents:delegate permission.")
+        raise ValueError(
+            "Caller agent does not have agents:delegate permission."
+        )
 
     if delegation_depth >= max_delegation_depth:
         raise ValueError("Maximum delegation depth reached.")
-
-    if not task or not task.strip():
-        raise ValueError("Delegated task cannot be empty.")
 
     target_agent = (
         db.query(Agent)
@@ -294,6 +183,17 @@ def run_delegate_task(
     if not target_agent:
         raise ValueError("Target agent not found or inactive.")
 
+    if workflow_id:
+        create_agent_message(
+            db=db,
+            sender_agent_id=caller_agent.id,
+            receiver_agent_id=target_agent.id,
+            content=task,
+            trace_id=f"workflow_{workflow_id}",
+            message_type="task",
+            task_id=None,
+        )
+
     result = run_agent_runtime(
         db=db,
         agent=target_agent,
@@ -306,38 +206,28 @@ def run_delegate_task(
     )
 
     if workflow_id:
-        workflow = (
-            db.query(AgentWorkflow)
-            .filter(AgentWorkflow.id == workflow_id)
-            .first()
+        create_agent_message(
+            db=db,
+            sender_agent_id=target_agent.id,
+            receiver_agent_id=caller_agent.id,
+            content=result["response"],
+            trace_id=f"workflow_{workflow_id}",
+            message_type="result",
+            task_id=None,
         )
 
-        if workflow:
-            context_data = get_workflow_context(workflow)
-
-            context_data.setdefault("messages", []).append(
-                {
-                    "from": caller_agent.name,
-                    "to": target_agent.name,
-                    "task": task,
-                    "reason": reason,
-                    "response": result["response"],
-                }
-            )
-
-            context_data.setdefault("completed_steps", []).append(
-                {
-                    "agent": target_agent.name,
-                    "task": task,
-                    "response": result["response"],
-                }
-            )
-
-            update_workflow_context(
-                db=db,
-                workflow=workflow,
-                context_data=context_data,
-            )
+        add_workflow_event(
+            db=db,
+            workflow_id=workflow_id,
+            event={
+                "from": caller_agent.name,
+                "to": target_agent.name,
+                "action": "delegate_task",
+                "reason": reason,
+                "response_summary": str(result["response"])[:300],
+            },
+            completed=True,
+        )
 
     return {
         "target_agent_id": target_agent.id,
@@ -359,9 +249,15 @@ def run_agent_runtime(
     save_result_to_memory: bool = False,
     workflow_id: int | None = None,
     delegation_depth: int = 0,
-    max_delegation_depth: int = 2,
+    max_delegation_depth: int = 3,
 ) -> dict[str, Any]:
     client = get_openai_client()
+
+    set_workflow_status(
+        db=db,
+        workflow_id=workflow_id,
+        status="running",
+    )
 
     memories = search_memory(
         agent_id=agent.id,
@@ -369,20 +265,25 @@ def run_agent_runtime(
         limit=memory_search_limit,
     )
 
-    tools = build_runtime_tools(db=db, agent=agent)
-    agent_directory = get_agent_directory(db=db, current_agent=agent)
+    tools = build_runtime_tools(
+        db=db,
+        agent=agent,
+    )
+
+    agent_directory = get_agent_directory(
+        db=db,
+        current_agent=agent,
+    )
 
     workflow_context = {}
 
-    if workflow_id:
-        workflow = (
-            db.query(AgentWorkflow)
-            .filter(AgentWorkflow.id == workflow_id)
-            .first()
-        )
+    workflow = get_workflow(
+        db=db,
+        workflow_id=workflow_id,
+    )
 
-        if workflow:
-            workflow_context = get_workflow_context(workflow)
+    if workflow:
+        workflow_context = get_workflow_context(workflow)
 
     memory_block = (
         "\n".join([f"- {memory}" for memory in memories])
@@ -392,34 +293,40 @@ def run_agent_runtime(
     system_prompt = f"""
 You are AgentMind Runtime.
 
-You are not a human-facing chatbot.
-You are a machine-facing reasoning runtime for autonomous AI agents.
+You are an autonomous multi-agent reasoning runtime.
 
 Current agent:
 - agent_id: {agent.id}
 - name: {agent.name}
 - purpose: {agent.purpose}
 
-Rules:
-- Use available tools only when useful.
-- Use memories only when relevant.
-- Return clear, concise, machine-usable answers.
-- Do not pretend a tool was used if it was not used.
-- For pure numeric arithmetic, use calculator.
-- For regular quadratic equations in x, use quadratic_solver.
-- If the task contains a URL and asks to read, research, summarize, extract, analyze, or review it, you MUST call url_reader before answering.
-- Never say "I will read" or "I will summarize" unless url_reader was actually called successfully.
-- If url_reader is available and the task contains a URL, prefer url_reader over memory_search.
-- memory_search should not replace url_reader for webpage tasks.
-- If another available agent has a better capability for the task, use delegate_task.
-- If url_reader fails because a site blocks direct fetching, and rss_reader is available, use rss_reader with the same website URL.
-- For latest news, latest posts, blogs, or site updates, prefer rss_reader when the website supports RSS/Atom feeds.
-- Never hardcode one website's feed path. Let rss_reader discover common feed paths automatically.
+Autonomous execution rules:
+- You may call multiple tools across multiple rounds.
+- After each tool result, inspect the result carefully.
+- Decide the next best action dynamically.
+- Continue reasoning until the task is complete.
+- If another agent is more specialized, delegate to them.
+- You may delegate multiple times when useful.
+- If the task already contains enough structured data, answer from the task data.
+- Do not use memory_search just because it is available.
+- If memory_search returns no useful result once, do not call memory_search again for the same task.
+- Never spend all tool rounds searching empty memory.
+- When enough information is gathered, stop calling tools and answer.
+- Never pretend a tool succeeded if it failed.
+- Agents should only call tools that match their role, capabilities, and permissions.
+- Coordinator agents should prefer delegation when another agent is more specialized.
+- Never invent tool results.
 - Do not delegate to yourself.
-- Do not silently rewrite malformed math input into valid input.
-- If input is malformed or ambiguous, allow the tool validator to reject it.
+- Do not infinitely loop tools.
 - Current delegation depth: {delegation_depth}
 - Maximum delegation depth: {max_delegation_depth}
+
+Tool behavior:
+- Use calculator for pure arithmetic only.
+- Use quadratic_solver for quadratic equations.
+- If task contains a URL and asks to read/research/summarize, use url_reader first.
+- If url_reader fails and rss_reader exists, use rss_reader.
+- Prefer rss_reader for latest news/posts/blogs.
 """
 
     messages = [
@@ -436,13 +343,13 @@ Task:
 Relevant memories:
 {memory_block}
 
-Available agents for delegation:
+Available agents:
 {json.dumps(agent_directory, indent=2)}
 
 Workflow ID:
 {workflow_id}
 
-Shared workflow context:
+Workflow context:
 {json.dumps(workflow_context, indent=2)}
 """,
         },
@@ -461,211 +368,227 @@ Shared workflow context:
             tool_choice = {
                 "type": "function",
                 "function": {
-                    "name": "url_reader"
-                }
+                    "name": "url_reader",
+                },
             }
 
-    first_response = client.chat.completions.create(
-        model=settings.OPENAI_MODEL,
-        messages=messages,
-        tools=tools,
-        tool_choice=tool_choice,
-    )
-
-    assistant_message = first_response.choices[0].message
     tool_calls_log = []
+    memory_search_count = 0
+    max_tool_rounds = 5
 
-    if not assistant_message.tool_calls:
-        final_text = assistant_message.content or ""
+    try:
+        for round_number in range(max_tool_rounds):
+            request_kwargs = {
+                "model": settings.OPENAI_MODEL,
+                "messages": messages,
+            }
 
-        if save_result_to_memory and final_text:
-            save_memory(
-                db=db,
-                agent_id=agent.id,
-                content=f"Task: {task}\nResult: {final_text}",
-            )
+            if tools:
+                request_kwargs["tools"] = tools
+                request_kwargs["tool_choice"] = (
+                    tool_choice if round_number == 0 else "auto"
+                )
+
+            response = client.chat.completions.create(**request_kwargs)
+            assistant_message = response.choices[0].message
+
+            if not assistant_message.tool_calls:
+                final_text = assistant_message.content or ""
+
+                if save_result_to_memory and final_text:
+                    save_memory(
+                        db=db,
+                        agent_id=agent.id,
+                        content=f"Task: {task}\nResult: {final_text}",
+                    )
+
+                set_workflow_status(
+                    db=db,
+                    workflow_id=workflow_id,
+                    status="completed",
+                )
+
+                return {
+                    "response": final_text,
+                    "memories_used": memories,
+                    "tool_calls": tool_calls_log,
+                }
+
+            messages.append(assistant_message)
+
+            for tool_call in assistant_message.tool_calls:
+                tool_name = tool_call.function.name
+
+                try:
+                    tool_args = json.loads(
+                        tool_call.function.arguments or "{}"
+                    )
+                except Exception:
+                    tool_args = {}
+
+                if tool_name == "memory_search":
+                    memory_search_count += 1
+
+                    if memory_search_count > 1:
+                        tool_error = (
+                            "memory_search was already tried. "
+                            "Use the structured task data instead."
+                        )
+
+                        tool_calls_log.append(
+                            {
+                                "round": round_number + 1,
+                                "tool_name": tool_name,
+                                "arguments": tool_args,
+                                "status": "failed",
+                                "result": None,
+                                "error": tool_error,
+                            }
+                        )
+
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": json.dumps(
+                                    {
+                                        "status": "failed",
+                                        "error": tool_error,
+                                    }
+                                ),
+                            }
+                        )
+
+                        continue
+
+                    tool_args["agent_id"] = agent.id
+
+                if tool_name == "quadratic_solver":
+                    tool_args["original_task"] = task
+
+                try:
+                    if tool_name == "delegate_task":
+                        tool_result = run_delegate_task(
+                            db=db,
+                            caller_agent=agent,
+                            target_agent_id=tool_args["target_agent_id"],
+                            task=tool_args["task"],
+                            reason=tool_args.get(
+                                "reason",
+                                "Delegated by autonomous AgentMind runtime.",
+                            ),
+                            workflow_id=workflow_id,
+                            delegation_depth=delegation_depth,
+                            max_delegation_depth=max_delegation_depth,
+                        )
+                    else:
+                        tool_result = run_registered_tool(
+                            db=db,
+                            tool_name=tool_name,
+                            input_data=tool_args,
+                        )
+
+                    tool_calls_log.append(
+                        {
+                            "round": round_number + 1,
+                            "tool_name": tool_name,
+                            "arguments": tool_args,
+                            "status": "success",
+                            "result": tool_result,
+                            "error": None,
+                        }
+                    )
+
+                    add_workflow_event(
+                        db=db,
+                        workflow_id=workflow_id,
+                        event={
+                            "round": round_number + 1,
+                            "agent": agent.name,
+                            "action": tool_name,
+                            "status": "success",
+                            "result_summary": str(tool_result)[:300],
+                        },
+                        completed=True,
+                    )
+
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps(
+                                {
+                                    "status": "success",
+                                    "result": tool_result,
+                                },
+                                default=str,
+                            ),
+                        }
+                    )
+
+                except Exception as error:
+                    error_message = str(error)
+
+                    tool_calls_log.append(
+                        {
+                            "round": round_number + 1,
+                            "tool_name": tool_name,
+                            "arguments": tool_args,
+                            "status": "failed",
+                            "result": None,
+                            "error": error_message,
+                        }
+                    )
+
+                    add_workflow_event(
+                        db=db,
+                        workflow_id=workflow_id,
+                        event={
+                            "round": round_number + 1,
+                            "agent": agent.name,
+                            "action": tool_name,
+                            "status": "failed",
+                            "error": error_message,
+                        },
+                        completed=False,
+                    )
+
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps(
+                                {
+                                    "status": "failed",
+                                    "error": error_message,
+                                    "retry_hint": (
+                                        "Try another valid tool or explain failure."
+                                    ),
+                                },
+                                default=str,
+                            ),
+                        }
+                    )
+
+        set_workflow_status(
+            db=db,
+            workflow_id=workflow_id,
+            status="failed",
+        )
 
         return {
-            "response": final_text,
+            "response": (
+                "Autonomous execution stopped because the maximum "
+                "tool rounds were reached."
+            ),
             "memories_used": memories,
             "tool_calls": tool_calls_log,
         }
 
-    messages.append(assistant_message)
-
-    for tool_call in assistant_message.tool_calls:
-        tool_name = tool_call.function.name
-        tool_args = json.loads(tool_call.function.arguments or "{}")
-
-        if tool_name == "memory_search":
-            tool_args["agent_id"] = agent.id
-
-        if tool_name == "quadratic_solver":
-            tool_args["original_task"] = task
-
-        try:
-            if tool_name == "delegate_task":
-                tool_result = run_delegate_task(
-                    db=db,
-                    caller_agent=agent,
-                    target_agent_id=tool_args["target_agent_id"],
-                    task=tool_args["task"],
-                    reason=tool_args["reason"],
-                    workflow_id=workflow_id,
-                    delegation_depth=delegation_depth,
-                    max_delegation_depth=max_delegation_depth,
-                )
-            else:
-                tool_result = run_registered_tool(
-                    tool_name=tool_name,
-                    input_data=tool_args,
-                )
-
-            tool_calls_log.append(
-                {
-                    "tool_name": tool_name,
-                    "arguments": tool_args,
-                    "status": "success",
-                    "result": tool_result,
-                    "error": None,
-                }
-            )
-
-            if workflow_id:
-                workflow = (
-                    db.query(AgentWorkflow)
-                    .filter(AgentWorkflow.id == workflow_id)
-                    .first()
-                )
-
-                if workflow:
-                    context_data = get_workflow_context(workflow)
-
-                    context_data.setdefault("messages", []).append(
-                        {
-                            "agent": agent.name,
-                            "tool": tool_name,
-                            "task": task,
-                            "status": "success",
-                        }
-                    )
-
-                    context_data.setdefault("completed_steps", []).append(
-                        {
-                            "agent": agent.name,
-                            "tool": tool_name,
-                            "task": task,
-                        }
-                    )
-
-                    update_workflow_context(
-                        db=db,
-                        workflow=workflow,
-                        context_data=context_data,
-                    )
-
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": json.dumps(
-                        {
-                            "status": "success",
-                            "result": tool_result,
-                        },
-                        default=str,
-                    ),
-                }
-            )
-
-        except Exception as error:
-            error_message = str(error)
-
-            tool_calls_log.append(
-                {
-                    "tool_name": tool_name,
-                    "arguments": tool_args,
-                    "status": "failed",
-                    "result": None,
-                    "error": error_message,
-                }
-            )
-
-            if workflow_id:
-                workflow = (
-                    db.query(AgentWorkflow)
-                    .filter(AgentWorkflow.id == workflow_id)
-                    .first()
-                )
-
-                if workflow:
-                    context_data = get_workflow_context(workflow)
-
-                    context_data.setdefault("messages", []).append(
-                        {
-                            "agent": agent.name,
-                            "tool": tool_name,
-                            "task": task,
-                            "status": "failed",
-                            "error": error_message,
-                        }
-                    )
-
-                    update_workflow_context(
-                        db=db,
-                        workflow=workflow,
-                        context_data=context_data,
-                    )
-
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": json.dumps(
-                        {
-                            "status": "failed",
-                            "error": error_message,
-                            "retry_hint": (
-                                "Explain the validation or runtime failure clearly. "
-                                "Do not pretend the tool succeeded."
-                            ),
-                        },
-                        default=str,
-                    ),
-                }
-            )
-
-    messages.append(
-        {
-            "role": "system",
-            "content": """
-When responding after tool execution:
-- If a tool succeeded, summarize the result clearly.
-- If a tool failed, explain the failure clearly.
-- If delegation happened, explain which agent handled the task.
-- If workflow context exists, mention only relevant workflow progress.
-- Do not say "I will proceed" unless another tool was actually called.
-- Keep the response useful for another AI agent or developer system.
-""",
-        }
-    )
-
-    final_response = client.chat.completions.create(
-        model=settings.OPENAI_MODEL,
-        messages=messages,
-    )
-
-    final_text = final_response.choices[0].message.content or ""
-
-    if save_result_to_memory and final_text:
-        save_memory(
+    except Exception:
+        set_workflow_status(
             db=db,
-            agent_id=agent.id,
-            content=f"Task: {task}\nResult: {final_text}",
+            workflow_id=workflow_id,
+            status="failed",
         )
-
-    return {
-        "response": final_text,
-        "memories_used": memories,
-        "tool_calls": tool_calls_log,
-    }
+        raise

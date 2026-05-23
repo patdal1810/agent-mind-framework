@@ -73,3 +73,24 @@ class WorkflowResponse(BaseModel):
     id: int
     objective: str
     status: str
+
+class ToolRegisterRequest(BaseModel):
+    name: str
+    description: str
+    permission_required: str
+
+    input_schema: dict[str, Any]
+
+    validation_rules: dict[str, Any] | list[str] | None = None
+
+    example_request: dict[str, Any] | None = None
+
+    is_webhook: bool = False
+
+    webhook_url: str | None = None
+
+    webhook_method: str = "POST"
+
+    webhook_headers: dict[str, Any] | None = None
+
+    webhook_timeout_seconds: int = 30

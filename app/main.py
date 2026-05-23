@@ -1,6 +1,5 @@
 import json
 import time
-
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
 
@@ -21,6 +20,7 @@ from app.schemas import (
     MemorySearch,
     ToolRunRequest,
     WorkflowCreateRequest,
+    ToolRegisterRequest,
 )
 from app.security import create_api_key, hash_api_key
 from app.task_service import (
@@ -435,31 +435,41 @@ def list_tools(
     db: Session = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
-    check_rate_limit(agent.id, agent.rate_limit_per_minute)
+    agent_permissions = [
+        permission.permission
+        for permission in agent.permissions
+    ]
 
-    db_tools = db.query(Tool).filter(Tool.is_active == True).all()
-    agent_permissions = [p.permission for p in agent.permissions]
-
-    result = []
-
-    for tool in db_tools:
-        spec = get_tool_spec(tool.name)
-
-        if not spec:
-            continue
-
-        result.append(
-            {
-                **spec,
-                "agent_has_permission": tool.permission_required in agent_permissions,
-            }
-        )
+    tools = (
+        db.query(Tool)
+        .filter(Tool.is_active == True)
+        .order_by(Tool.name.asc())
+        .all()
+    )
 
     return {
         "success": True,
-        "result": result,
+        "result": [
+            {
+                "id": tool.id,
+                "name": tool.name,
+                "description": tool.description,
+                "permission_required": tool.permission_required,
+                "input_schema": tool.input_schema,
+                "validation_rules": tool.validation_rules,
+                "output_schema": getattr(tool, "output_schema", None),
+                "example_request": tool.example_request,
+                "example_response": getattr(tool, "example_response", None),
+                "is_webhook": tool.is_webhook,
+                "webhook_url": tool.webhook_url,
+                "webhook_method": tool.webhook_method,
+                "agent_has_permission": (
+                    tool.permission_required in agent_permissions
+                ),
+            }
+            for tool in tools
+        ],
     }
-
 
 @app.get("/v1/tools/{tool_name}")
 def get_tool_details(
@@ -834,5 +844,77 @@ def get_workflow(
             "shared_context": get_workflow_context(workflow),
             "created_at": workflow.created_at,
             "updated_at": workflow.updated_at,
+        },
+    }
+
+
+@app.post("/v1/tools/register")
+def register_tool(
+    request: ToolRegisterRequest,
+    db: Session = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    existing_tool = (
+        db.query(Tool)
+        .filter(Tool.name == request.name)
+        .first()
+    )
+
+    if existing_tool:
+        existing_tool.description = request.description
+        existing_tool.permission_required = request.permission_required
+        existing_tool.input_schema = request.input_schema
+        existing_tool.validation_rules = request.validation_rules
+        existing_tool.example_request = request.example_request
+        existing_tool.is_webhook = request.is_webhook
+        existing_tool.webhook_url = request.webhook_url
+        existing_tool.webhook_method = request.webhook_method
+        existing_tool.webhook_headers = request.webhook_headers
+        existing_tool.webhook_timeout_seconds = request.webhook_timeout_seconds
+        existing_tool.is_active = True
+
+        db.commit()
+        db.refresh(existing_tool)
+
+        return {
+            "success": True,
+            "message": "Tool updated successfully",
+            "result": {
+                "id": existing_tool.id,
+                "name": existing_tool.name,
+                "permission_required": existing_tool.permission_required,
+                "is_webhook": existing_tool.is_webhook,
+                "webhook_url": existing_tool.webhook_url,
+            },
+        }
+
+    tool = Tool(
+        name=request.name,
+        description=request.description,
+        permission_required=request.permission_required,
+        input_schema=request.input_schema,
+        validation_rules=request.validation_rules,
+        example_request=request.example_request,
+        is_webhook=request.is_webhook,
+        webhook_url=request.webhook_url,
+        webhook_method=request.webhook_method,
+        webhook_headers=request.webhook_headers,
+        webhook_timeout_seconds=request.webhook_timeout_seconds,
+        is_active=True,
+    )
+
+    db.add(tool)
+    db.commit()
+    db.refresh(tool)
+
+    return {
+        "success": True,
+        "message": "Tool registered successfully",
+        "result": {
+            "id": tool.id,
+            "name": tool.name,
+            "permission_required": tool.permission_required,
+            "is_webhook": tool.is_webhook,
+            "webhook_url": tool.webhook_url,
         },
     }
