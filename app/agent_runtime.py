@@ -170,6 +170,7 @@ def run_delegate_task(
     workflow_id: int | None = None,
     delegation_depth: int = 0,
     max_delegation_depth: int = 3,
+    llm_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     caller_permissions = [
         permission.permission
@@ -216,6 +217,7 @@ def run_delegate_task(
         workflow_id=workflow_id,
         delegation_depth=delegation_depth + 1,
         max_delegation_depth=max_delegation_depth,
+        llm_config=llm_config,
     )
 
     if workflow_id:
@@ -497,6 +499,7 @@ Workflow context:
                             workflow_id=workflow_id,
                             delegation_depth=delegation_depth,
                             max_delegation_depth=max_delegation_depth,
+                            llm_config=llm_config
                         )
                     else:
                         tool_result = run_registered_tool(
