@@ -109,6 +109,7 @@ class AgentTask(Base):
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
+    workflow_id = Column(Integer, ForeignKey("agent_workflows.id"), nullable=True)
 
 
 class AgentMessage(Base):
