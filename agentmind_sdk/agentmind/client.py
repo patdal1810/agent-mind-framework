@@ -368,6 +368,7 @@ class AgentMindClient:
         memory_search_limit: int = 5,
         save_result_to_memory: bool = False,
         workflow_id: int | None = None,
+        llm_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Send task to AgentMind Runtime.
@@ -385,6 +386,7 @@ class AgentMindClient:
             "task": task,
             "memory_search_limit": memory_search_limit,
             "save_result_to_memory": save_result_to_memory,
+            "llm_config": llm_config,
         }
 
         if workflow_id is not None:
@@ -402,6 +404,7 @@ class AgentMindClient:
         memory_search_limit: int = 5,
         save_result_to_memory: bool = False,
         workflow_id: int | None = None,
+        llm_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Alias for chat().
@@ -412,6 +415,7 @@ class AgentMindClient:
             memory_search_limit=memory_search_limit,
             save_result_to_memory=save_result_to_memory,
             workflow_id=workflow_id,
+            llm_config=llm_config,
         )
 
     # TASK HISTORY
