@@ -2,6 +2,7 @@ import json
 import time
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
+import uuid
 
 from app.agent_runtime import run_agent_runtime
 from app.audit import create_trace_id, write_audit_log
@@ -588,11 +589,13 @@ def agent_chat(
     db: Session = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
+    trace_id = f"trace_{uuid.uuid4().hex}"
     task_record = AgentTask(
         task=request.task,
         status="running",
         assigned_agent_id=agent.id,
         workflow_id=request.workflow_id,
+        trace_id=trace_id,
     )
 
     db.add(task_record)
@@ -627,6 +630,7 @@ def agent_chat(
             "tool_calls": result["tool_calls"],
             "error": None,
             "workflow_id": request.workflow_id,
+            "trace_id": trace_id,
         }
 
     except Exception as error:
@@ -644,6 +648,7 @@ def agent_chat(
             "tool_calls": [],
             "error": str(error),
             "workflow_id": request.workflow_id,
+            "trace_id": trace_id,
         }
 
 @app.get("/v1/tasks")
