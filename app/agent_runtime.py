@@ -20,11 +20,24 @@ def task_contains_url(task: str) -> bool:
     return bool(re.search(r"https?://[^\s]+", task))
 
 
-def get_openai_client() -> OpenAI:
-    if not settings.OPENAI_API_KEY:
-        raise ValueError("OPENAI_API_KEY is not configured")
+def get_openai_client(
+    llm_config: dict[str, Any],
+) -> tuple[OpenAI, str]:
+    provider = llm_config.get("provider", "openai")
+    api_key = llm_config.get("api_key")
+    model = llm_config.get("model", settings.OPENAI_MODEL)
 
-    return OpenAI(api_key=settings.OPENAI_API_KEY)
+    if provider != "openai":
+        raise ValueError(
+            f"Unsupported LLM provider for now: {provider}"
+        )
+
+    if not api_key:
+        raise ValueError(
+            "Developer OpenAI API key is required in llm_config.api_key."
+        )
+
+    return OpenAI(api_key=api_key), model
 
 
 def get_workflow(
@@ -250,8 +263,12 @@ def run_agent_runtime(
     workflow_id: int | None = None,
     delegation_depth: int = 0,
     max_delegation_depth: int = 3,
+    llm_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    client = get_openai_client()
+    if llm_config is None:
+        raise ValueError("llm_config is required.")
+
+    client, model = get_openai_client(llm_config)
 
     set_workflow_status(
         db=db,
@@ -379,7 +396,7 @@ Workflow context:
     try:
         for round_number in range(max_tool_rounds):
             request_kwargs = {
-                "model": settings.OPENAI_MODEL,
+                "model": model,
                 "messages": messages,
             }
 

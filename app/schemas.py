@@ -3,6 +3,22 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+
+
+class LLMConfig(BaseModel):
+    provider: str = "openai"
+    api_key: str
+    model: str = "gpt-4.1-mini"
+
+
+class AgentChatRequest(BaseModel):
+    task: str
+    memory_search_limit: int = 5
+    save_result_to_memory: bool = False
+    workflow_id: int | None = None
+    llm_config: LLMConfig
+
+
 class AgentCreate(BaseModel):
     name: str
     purpose: str | None = None
@@ -43,11 +59,6 @@ class StandardResponse(BaseModel):
     trace_id: str
     latency_ms: int
 
-class AgentChatRequest(BaseModel):
-    task: str
-    save_result_to_memory: bool = False
-    memory_search_limit: int = 5
-    workflow_id: int | None = None
 
 class AgentChatResponse(BaseModel):
     success: bool

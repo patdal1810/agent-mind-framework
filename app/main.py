@@ -588,20 +588,16 @@ def agent_chat(
     db: Session = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
-    start = time.time()
-    trace_id = create_trace_id()
-
-    check_rate_limit(agent.id, agent.rate_limit_per_minute)
-
-    task_record = create_task_record(
-        db=db,
+    task_record = AgentTask(
         task=request.task,
+        status="running",
         assigned_agent_id=agent.id,
-        caller_agent_id=None,
-        trace_id=trace_id,
+        workflow_id=request.workflow_id,
     )
 
-    mark_task_running(db=db, task_record=task_record)
+    db.add(task_record)
+    db.commit()
+    db.refresh(task_record)
 
     try:
         result = run_agent_runtime(
@@ -611,24 +607,16 @@ def agent_chat(
             memory_search_limit=request.memory_search_limit,
             save_result_to_memory=request.save_result_to_memory,
             workflow_id=request.workflow_id,
+            llm_config=request.llm_config.model_dump(),
         )
 
-        mark_task_completed(
-            db=db,
-            task_record=task_record,
-            response=result["response"],
-            tool_calls=result["tool_calls"],
-        )
+        task_record.status = "completed"
+        task_record.response = result["response"]
+        task_record.tool_calls = result["tool_calls"]
+        task_record.error = None
 
-        write_audit_log(
-            db=db,
-            agent_id=agent.id,
-            action="agent.chat",
-            input_data=request.model_dump(),
-            output_data=result,
-            status="success",
-            trace_id=trace_id,
-        )
+        db.commit()
+        db.refresh(task_record)
 
         return {
             "success": True,
@@ -638,30 +626,25 @@ def agent_chat(
             "memories_used": result["memories_used"],
             "tool_calls": result["tool_calls"],
             "error": None,
-            "trace_id": trace_id,
-            "latency_ms": int((time.time() - start) * 1000),
             "workflow_id": request.workflow_id,
         }
 
     except Exception as error:
-        mark_task_failed(
-            db=db,
-            task_record=task_record,
-            error=str(error),
-        )
+        task_record.status = "failed"
+        task_record.error = str(error)
 
-        write_audit_log(
-            db=db,
-            agent_id=agent.id,
-            action="agent.chat",
-            input_data=request.model_dump(),
-            output_data={"error": str(error)},
-            status="error",
-            trace_id=trace_id,
-        )
+        db.commit()
 
-        raise HTTPException(status_code=500, detail=str(error))
-
+        return {
+            "success": False,
+            "task_id": task_record.id,
+            "task": request.task,
+            "response": None,
+            "memories_used": [],
+            "tool_calls": [],
+            "error": str(error),
+            "workflow_id": request.workflow_id,
+        }
 
 @app.get("/v1/tasks")
 def list_tasks(
