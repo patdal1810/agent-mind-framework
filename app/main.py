@@ -615,7 +615,10 @@ def agent_chat(
 
         task_record.status = "completed"
         task_record.response = result["response"]
-        task_record.tool_calls = result["tool_calls"]
+        task_record.tool_calls = json.dumps(
+            result["tool_calls"],
+            default=str,
+        )
         task_record.error = None
 
         db.commit()
@@ -634,6 +637,8 @@ def agent_chat(
         }
 
     except Exception as error:
+        db.rollback()
+        
         task_record.status = "failed"
         task_record.error = str(error)
 
