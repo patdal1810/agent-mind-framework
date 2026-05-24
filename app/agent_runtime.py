@@ -93,22 +93,55 @@ def add_workflow_event(
     )
 
 
-def build_runtime_tools(
-    db: Session,
-    agent: Agent,
-) -> list[dict[str, Any]]:
-    db_tools = (
-        db.query(Tool)
-        .filter(Tool.is_active == True)
-        .all()
-    )
-
+def build_runtime_tools(db: Session, agent: Agent) -> list[dict[str, Any]]:
     agent_permissions = [
         permission.permission
         for permission in agent.permissions
     ]
 
     runtime_tools = []
+
+    if "agents:delegate" in agent_permissions:
+        runtime_tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "delegate_task",
+                    "description": (
+                        "Delegate a task to another registered specialist agent "
+                        "when that agent is better suited for the work."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "target_agent_id": {
+                                "type": "integer",
+                                "description": "The ID of the agent to delegate the task to.",
+                            },
+                            "task": {
+                                "type": "string",
+                                "description": "The exact task to assign to the target agent.",
+                            },
+                            "reason": {
+                                "type": "string",
+                                "description": "Why this target agent is best suited for the task.",
+                            },
+                        },
+                        "required": [
+                            "target_agent_id",
+                            "task",
+                            "reason",
+                        ],
+                    },
+                },
+            }
+        )
+
+    db_tools = (
+        db.query(Tool)
+        .filter(Tool.is_active == True)
+        .all()
+    )
 
     for tool in db_tools:
         if tool.permission_required not in agent_permissions:
