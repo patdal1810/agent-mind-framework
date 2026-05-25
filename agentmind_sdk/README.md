@@ -9,7 +9,7 @@ Python SDK for AgentMind, an infrastructure platform for autonomous AI agents.
 ## Install locally
 
 ```bash
-pip install -e .
+pip install agentmind-sdk
 ```
 
 ---
@@ -24,7 +24,14 @@ client = AgentMindClient(
     api_key="agm_your_api_key"
 )
 
-response = client.chat("What is 45 * 12?")
+response = client.chat(
+    task="What is 45 * 12?",
+    llm_config={
+        "provider": "openai",
+        "api_key": "your_openai_api_key",
+        "model": "gpt-4.1-mini"
+    }
+)
 print(response)
 ```
 
