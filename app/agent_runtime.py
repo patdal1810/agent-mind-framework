@@ -19,7 +19,6 @@ from app.workflow_service import (
 def task_contains_url(task: str) -> bool:
     return bool(re.search(r"https?://[^\s]+", task))
 
-
 def get_openai_client(
     llm_config: dict[str, Any],
 ) -> tuple[OpenAI, str]:
@@ -426,7 +425,7 @@ Workflow context:
 
     tool_calls_log = []
     memory_search_count = 0
-    max_tool_rounds = 5
+    max_tool_rounds = 8
 
     try:
         for round_number in range(max_tool_rounds):
